@@ -39,3 +39,10 @@ all = { level = "warn", priority = -1 }
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# brok-sdk is not on crates.io yet: resolve it from GitHub. Delete this
+# section once it is published. Polyrepo development (../.cargo/config.toml,
+# written by brok/scripts/bootstrap) overrides it with the local checkout;
+# do not commit the Cargo.lock changes that produces.
+[patch.crates-io]
+brok-sdk = { git = "https://github.com/brokspace/brok-sdk", branch = "main" }
