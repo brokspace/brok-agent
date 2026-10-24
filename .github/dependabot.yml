@@ -1,7 +1,9 @@
 version: 2
 updates:
-  # Cargo updates are enabled once brok-sdk is published on crates.io
-  # (until then Dependabot cannot resolve it).
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
   - package-ecosystem: github-actions
     directory: /
     schedule:

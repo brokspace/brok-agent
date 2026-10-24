@@ -44,5 +44,27 @@
       "--release"
     ],
     "artifact": "target/release/brok-agent"
+  },
+  "releases": {
+    "linux-aarch64": {
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.0/brok-agent-linux-aarch64",
+      "sha256": "6e8ceb69aea6fc4793cfa4095e24d5c85d4ee0e0eae9acf87a6df0c6ddf455c1"
+    },
+    "linux-x86_64": {
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.0/brok-agent-linux-x86_64",
+      "sha256": "b426567ee9fff7815e116734690b8f1efcc2d656957918465d216ccf9b28cb9b"
+    },
+    "macos-aarch64": {
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.0/brok-agent-macos-aarch64",
+      "sha256": "b141904e896e8316625761620199cf4f050f491d58321bc5628ab31845c1304b"
+    },
+    "macos-x86_64": {
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.0/brok-agent-macos-x86_64",
+      "sha256": "97c6e27f6e6b5d955e4ef7f44ee755a10cffb9e71509307947424db77a9ad276"
+    },
+    "windows-x86_64": {
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.0/brok-agent-windows-x86_64.exe",
+      "sha256": "6261254c3641471cb6e32e76342aa4c680e3e294aa17646ba89b9704cd3e8815"
+    }
   }
 }
