@@ -34,4 +34,9 @@ jobs:
             echo "::error::CARGO_REGISTRY_TOKEN is not set (gh secret set CARGO_REGISTRY_TOKEN --org brokspace --visibility all)"
             exit 1
           fi
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          if curl -fsS -A "brokspace-release (github.com/brokspace/brok-agent)" "https://crates.io/api/v1/crates/brok-agent/$version" >/dev/null 2>&1; then
+            echo "brok-agent $version is already published"
+            exit 0
+          fi
           cargo publish --no-verify
