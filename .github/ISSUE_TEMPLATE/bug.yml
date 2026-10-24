@@ -1,0 +1,48 @@
+name: Bug
+description: brok-agent (change tracking, review or `brok ask` answers) did the wrong thing.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        brok-agent is the default system shard. Problems with indexing, search or the `brok` CLI itself belong in [brokspace/brok](https://github.com/brokspace/brok/issues).
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `brok doctor`
+      description: Shows the brok and agent versions, the LLM provider and whether it is reachable. Remove anything sensitive.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: LLM provider and model
+      description: e.g. Ollama qwen2.5-coder:7b, LM Studio, Anthropic claude-sonnet-5-5.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Answers (brok ask, brok skill run)
+        - Change tracking (file:changed)
+        - Pre-indexation review
+        - Guardrails / secret redaction
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran and what the agent did. The agent's lines in the `brok run` output (or `.brokspace/logs/brok-agent.log`) help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true

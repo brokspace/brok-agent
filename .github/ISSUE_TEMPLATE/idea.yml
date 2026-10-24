@@ -1,0 +1,29 @@
+name: Idea or feedback
+description: A change to the default agent, grounded in a problem you actually hit.
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The default agent stays small and general. Domain-specific behaviour (a security auditor, a ticket bot, a team-specific review policy) is a great fit for its own shard: see [brok-shard-template](https://github.com/brokspace/brok-shard-template).
+        An idea stays open when it clears the bar in [`SCOPE.md`](https://github.com/brokspace/brok/blob/main/SCOPE.md): an observed problem, and a fit with the philosophy.
+  - type: checkboxes
+    id: read-scope
+    attributes:
+      label: Before filing
+      options:
+        - label: I've read `SCOPE.md` and checked `.out-of-scope/` in brokspace/brok, and this could not reasonably be its own shard.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What got in your way
+      description: The real situation, the command you ran, the provider and model, and why the result was a problem.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true

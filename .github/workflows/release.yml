@@ -1,0 +1,116 @@
+name: Release
+
+# Push a tag such as `v0.1.0` to build binaries for every platform and attach
+# them, with `.sha256` checksums, to the GitHub release. The final job prints
+# the `releases` block to paste into shard.json so `brok shard install` can
+# download a verified binary instead of compiling from source.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN: brok-agent
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "$GITHUB_REF_NAME"
+
+  build:
+    needs: create-release
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x86_64, os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { platform: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { platform: macos-aarch64, os: macos-latest, target: aarch64-apple-darwin }
+          - { platform: macos-x86_64, os: macos-latest, target: x86_64-apple-darwin }
+          - { platform: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc, ext: .exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: brok-agent
+      - uses: actions/checkout@v4
+        with:
+          repository: brokspace/brok-sdk
+          path: brok-sdk
+      # Same layout as local polyrepo development: patch crates.io brok-sdk
+      # with the sibling checkout (see brok/scripts/bootstrap.sh).
+      - name: Use the brok-sdk checkout
+        shell: bash
+        run: |
+          mkdir -p .cargo
+          echo '[patch.crates-io]' > .cargo/config.toml
+          echo 'brok-sdk = { path = "brok-sdk" }' >> .cargo/config.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: brok-agent
+          key: ${{ matrix.target }}
+      - name: Build
+        working-directory: brok-agent
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        working-directory: brok-agent
+        run: |
+          asset="$BIN-${{ matrix.platform }}${{ matrix.ext }}"
+          cp "target/${{ matrix.target }}/release/$BIN${{ matrix.ext }}" "$asset"
+          if command -v sha256sum >/dev/null; then sha256sum "$asset" | cut -d' ' -f1 > "$asset.sha256";
+          else shasum -a 256 "$asset" | cut -d' ' -f1 > "$asset.sha256"; fi
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+      - name: Upload
+        shell: bash
+        working-directory: brok-agent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+
+  manifest-snippet:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print the shard.json `releases` block
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir assets && cd assets
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256'
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          {
+            echo '```json'
+            echo '"releases": {'
+            first=1
+            for f in *.sha256; do
+              asset="${f%.sha256}"; platform="${asset#$BIN-}"; platform="${platform%.exe}"
+              [ $first -eq 1 ] || echo ','
+              first=0
+              printf '  "%s": { "url": "%s/%s", "sha256": "%s" }' "$platform" "$base" "$asset" "$(cat "$f")"
+            done
+            echo; echo '}'; echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # Assets are uploaded to a draft; publish only when every platform built,
+  # so `releases/latest/download/...` (used by the installers) never breaks.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

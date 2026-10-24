@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Check the shard and brok-sdk out side by side.
+      - uses: actions/checkout@v4
+        with:
+          path: brok-agent
+      - uses: actions/checkout@v4
+        with:
+          repository: brokspace/brok-sdk
+          path: brok-sdk
+      # Same layout as local polyrepo development: patch crates.io brok-sdk
+      # with the sibling checkout (see brok/scripts/bootstrap.sh).
+      - name: Use the brok-sdk checkout
+        shell: bash
+        run: |
+          mkdir -p .cargo
+          echo '[patch.crates-io]' > .cargo/config.toml
+          echo 'brok-sdk = { path = "brok-sdk" }' >> .cargo/config.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: brok-agent
+      - name: Format
+        working-directory: brok-agent
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: brok-agent
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test
+        working-directory: brok-agent
+        run: cargo test --locked

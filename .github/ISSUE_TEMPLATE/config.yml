@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/brokspace/brok/discussions/categories/q-a
+    about: Ask in Discussions on brokspace/brok (include the output of `brok doctor`).
+  - name: Brokspace documentation
+    url: https://github.com/brokspace/brok/tree/main/docs
+    about: Architecture, configuration, shards and skills guides.
+  - name: Security vulnerability
+    url: https://github.com/brokspace/brok-agent/security/advisories/new
+    about: Report security issues privately, never in a public issue.

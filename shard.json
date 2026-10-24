@@ -1,0 +1,22 @@
+{
+  "name": "brok-agent",
+  "version": "0.1.0",
+  "description": "Default Brokspace system shard: git change tracking, pre-indexation review and RAG answers",
+  "authors": ["Brokspace contributors"],
+  "license": "MIT OR Apache-2.0",
+  "repository": "https://github.com/brokspace/brok-agent",
+  "entrypoint": "bin/brok-agent",
+  "runtime": "native",
+  "permissions": {
+    "filesystem": { "read": ["."], "write": [] },
+    "network": true,
+    "process": ["git"],
+    "env": ["*_API_KEY", "OPENAI_*", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]
+  },
+  "subscribes_to": ["agent:ask"],
+  "publishes_to": ["file:changed", "review:result", "agent:ask.*", "index:search"],
+  "build": {
+    "command": ["cargo", "build", "--release"],
+    "artifact": "target/release/brok-agent"
+  }
+}
