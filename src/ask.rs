@@ -120,7 +120,7 @@ async fn answer(
     let hits = if limit == 0 {
         Vec::new()
     } else {
-        let search = SearchRequest { query: ask.prompt.clone(), limit, focus: None };
+        let search = SearchRequest { query: retrieval_query(&ask.prompt, &ask.history), limit, focus: None };
         match client.call::<SearchRequest, SearchResults>(&search, SEARCH_TIMEOUT).await {
             Ok(results) => results.hits,
             Err(e) => {
@@ -139,12 +139,51 @@ async fn answer(
     if let Some(skill) = &ask.skill {
         tracing::info!(skill = %skill.name, "running skill");
     }
-    let messages = [Message::system(&system), Message::user(user_message(&ask.prompt, &context.text))];
+    let mut messages = vec![Message::system(&system)];
+    messages.extend(history_messages(&ask.history));
+    messages.push(Message::user(user_message(&ask.prompt, &context.text)));
     let mut deltas = pin!(model.stream(&messages).await?);
     while let Some(delta) = deltas.next().await {
         client.reply(request, &AskChunk { text: delta? }).await?;
     }
     Ok(AskDone { provider: provider_name.to_owned(), model: model.model().to_owned(), sources: context.sources })
+}
+
+/// Earlier turns kept for a follow-up question.
+const MAX_HISTORY_TURNS: usize = 12;
+/// Character budget for earlier turns (the newest are kept).
+const MAX_HISTORY_CHARS: usize = 12_000;
+/// Prompts shorter than this are treated as follow-ups for retrieval.
+const FOLLOW_UP_CHARS: usize = 40;
+
+/// The conversation so far as chat messages, oldest first, keeping only the
+/// newest turns that fit the turn and character budgets.
+fn history_messages(history: &[ChatTurn]) -> Vec<Message> {
+    let mut kept = Vec::new();
+    let mut chars = 0;
+    for turn in history.iter().rev().take(MAX_HISTORY_TURNS) {
+        chars += turn.content.chars().count();
+        if chars > MAX_HISTORY_CHARS {
+            break;
+        }
+        kept.push(match turn.role {
+            ChatRole::User => Message::user(&turn.content),
+            ChatRole::Assistant => Message::assistant(&turn.content),
+        });
+    }
+    kept.reverse();
+    kept
+}
+
+/// What to search the index for. A short follow-up ("and where is it
+/// tested?") carries little meaning alone, so the last user question is
+/// prepended.
+fn retrieval_query(prompt: &str, history: &[ChatTurn]) -> String {
+    let last_question = history.iter().rev().find(|t| t.role == ChatRole::User);
+    match last_question {
+        Some(turn) if prompt.chars().count() < FOLLOW_UP_CHARS => format!("{} {prompt}", turn.content),
+        _ => prompt.to_owned(),
+    }
 }
 
 /// The system prompt, with a skill's instructions appended when the request
@@ -165,6 +204,40 @@ fn system_prompt(base: &str, skill: Option<&SkillInvocation>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn turn(role: ChatRole, content: &str) -> ChatTurn {
+        ChatTurn { role, content: content.into() }
+    }
+
+    #[test]
+    fn history_keeps_the_newest_turns_in_order() {
+        let history: Vec<ChatTurn> = (0..20)
+            .map(|i| turn(if i % 2 == 0 { ChatRole::User } else { ChatRole::Assistant }, &format!("m{i}")))
+            .collect();
+        let messages = history_messages(&history);
+        assert_eq!(messages.len(), MAX_HISTORY_TURNS);
+        assert_eq!(messages.first().unwrap().content, "m8");
+        assert_eq!(messages.last().unwrap(), &Message::assistant("m19"));
+        assert_eq!(messages[0].role, crate::llm::Role::User);
+    }
+
+    #[test]
+    fn history_respects_the_character_budget() {
+        let big = "x".repeat(MAX_HISTORY_CHARS - 10);
+        let history = vec![turn(ChatRole::User, &big), turn(ChatRole::Assistant, "short answer")];
+        let messages = history_messages(&history);
+        assert_eq!(messages, vec![Message::assistant("short answer")]);
+        assert!(history_messages(&[]).is_empty());
+    }
+
+    #[test]
+    fn follow_ups_reuse_the_last_question_for_retrieval() {
+        let history = vec![turn(ChatRole::User, "how are tokens rotated"), turn(ChatRole::Assistant, "...")];
+        assert_eq!(retrieval_query("and the tests?", &history), "how are tokens rotated and the tests?");
+        let long = "explain the whole shard install flow in detail please";
+        assert_eq!(retrieval_query(long, &history), long);
+        assert_eq!(retrieval_query("hi", &[]), "hi");
+    }
 
     #[test]
     fn skills_extend_the_system_prompt() {

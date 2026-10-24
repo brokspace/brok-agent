@@ -46,6 +46,8 @@ pub enum Role {
     System,
     /// End user.
     User,
+    /// The model (earlier turns of a conversation).
+    Assistant,
 }
 
 /// One chat message.
@@ -66,6 +68,11 @@ impl Message {
     /// A user message.
     pub fn user(content: impl Into<String>) -> Self {
         Self { role: Role::User, content: content.into() }
+    }
+
+    /// An earlier answer of the model.
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self { role: Role::Assistant, content: content.into() }
     }
 }
 

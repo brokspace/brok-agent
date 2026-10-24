@@ -1,6 +1,6 @@
 {
   "name": "brok-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Default Brokspace system shard: git change tracking, pre-indexation review and RAG answers",
   "authors": [
     "Brokspace contributors"
@@ -44,27 +44,5 @@
       "--release"
     ],
     "artifact": "target/release/brok-agent"
-  },
-  "releases": {
-    "linux-aarch64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.1.0/brok-agent-linux-aarch64",
-      "sha256": "32fb6deee2fe07c560bb62b36cd0638f3076c99494d681ced4a5ce8be16be9c3"
-    },
-    "linux-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.1.0/brok-agent-linux-x86_64",
-      "sha256": "a21b706b131efe63a191ba2f66595919ee480e2dd4e209d2aca237dff71c0ea8"
-    },
-    "macos-aarch64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.1.0/brok-agent-macos-aarch64",
-      "sha256": "fb8ab255146c263f611f34d2a704f7f6433384a094a4cf63984deb67c42868e8"
-    },
-    "macos-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.1.0/brok-agent-macos-x86_64",
-      "sha256": "fcf6a751db1f806e6640dff781e2d762f6ac394fae18148bcf0c4d437d8f0a81"
-    },
-    "windows-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.1.0/brok-agent-windows-x86_64.exe",
-      "sha256": "54ae2f8b0dabe49be56fc8a898b25721fe8382ffb842d7ef2164883b12057947"
-    }
   }
 }

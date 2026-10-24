@@ -37,7 +37,7 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
 name = "brok-agent"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "brok-sdk",
@@ -56,8 +56,8 @@ dependencies = [
 
 [[package]]
 name = "brok-sdk"
-version = "0.1.0"
-source = "git+https://github.com/brokspace/brok-sdk?branch=main#abf4091eabb28805179bfa7958473a3e49f22a2c"
+version = "0.1.1"
+source = "git+https://github.com/brokspace/brok-sdk?branch=main#dfa8575c300b89b49618b9058a36972a599d7dfe"
 dependencies = [
  "bytes",
  "futures-util",
@@ -149,7 +149,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -841,7 +841,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1079,7 +1079,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

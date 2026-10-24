@@ -5,9 +5,18 @@ The default system shard of [Brokspace](https://github.com/brokspace/brok). `bro
 
 | Responsibility | How |
 |---|---|
-| **Change tracking** | Every few seconds runs `git diff --name-only HEAD` and `git ls-files --others --exclude-standard` in the root repository and every initialized submodule, fingerprints dirty files and publishes only what changed as `file:changed`. The core indexer re-indexes those files. |
+| **Change tracking** | Every few seconds, in every repository of the workspace (the root repository, its submodules and independent repositories cloned inside it), fingerprints dirty files (`git diff --name-only HEAD` + untracked files) and follows `HEAD`: after a commit, pull, checkout or rebase, the files that differ between the old and new commit are reported too. Only what changed is published as `file:changed`, so the core indexer stays fresh. |
 | **Pre-indexation review** | Optionally sends changed files matching glob filters (e.g. `src/api/**`, never `**/*.md`) to an LLM before publishing `file:changed`, and reports a `review:result` with a `pass` / `warn` / `fail` verdict. |
 | **Answers (RAG)** | Handles `brok ask`: hybrid search over the local index, context assembly within a budget, secret redaction, then streams the answer from any OpenAI-compatible API. |
+
+## Multi-repo workspaces
+
+A workspace does not have to be a single repository. Point Brokspace at a
+folder that holds several independent clones (`~/work/acme/{api,web,infra}`)
+and the agent tracks each of them: repositories are discovered up to four
+levels deep (hidden folders, `node_modules`, `target`, `dist`, `build` and
+`vendor` are skipped) and rediscovered every minute, so a fresh `git clone`
+is picked up without a restart.
 
 ## Install
 
