@@ -47,24 +47,24 @@
   },
   "releases": {
     "linux-aarch64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.0/brok-agent-linux-aarch64",
-      "sha256": "6e8ceb69aea6fc4793cfa4095e24d5c85d4ee0e0eae9acf87a6df0c6ddf455c1"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.1/brok-agent-linux-aarch64",
+      "sha256": "5c6d4c1257ee90a381cabd43287d694f3bc57ed0bf86d17515a14f54ac946551"
     },
     "linux-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.0/brok-agent-linux-x86_64",
-      "sha256": "b426567ee9fff7815e116734690b8f1efcc2d656957918465d216ccf9b28cb9b"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.1/brok-agent-linux-x86_64",
+      "sha256": "a5bc232b21060f0439d47f4d791fdf6c306ce14633c06f3070ada4d8327d0b74"
     },
     "macos-aarch64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.0/brok-agent-macos-aarch64",
-      "sha256": "b141904e896e8316625761620199cf4f050f491d58321bc5628ab31845c1304b"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.1/brok-agent-macos-aarch64",
+      "sha256": "cb9ae6434b2db0fead4ff6236b7ef4e07cd164fc689f9fa3ee4f054f86a3d9b0"
     },
     "macos-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.0/brok-agent-macos-x86_64",
-      "sha256": "97c6e27f6e6b5d955e4ef7f44ee755a10cffb9e71509307947424db77a9ad276"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.1/brok-agent-macos-x86_64",
+      "sha256": "74bac46e8dd9fcf33348035cd21d2c906d3054094202922f7624f74572e01e0e"
     },
     "windows-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.0/brok-agent-windows-x86_64.exe",
-      "sha256": "6261254c3641471cb6e32e76342aa4c680e3e294aa17646ba89b9704cd3e8815"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.2.1/brok-agent-windows-x86_64.exe",
+      "sha256": "a4e01003bbd7f50dea4dc3b5247f3e9a63935f0a6c59968d372629016c4af4a0"
     }
   }
 }
