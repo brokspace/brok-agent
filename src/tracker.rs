@@ -118,7 +118,7 @@ impl Tracker {
         if self.discovered_at.is_none_or(|at| at.elapsed() >= REDISCOVER_EVERY) {
             let repos = discover_repositories(&self.root).await;
             if repos != self.repos {
-                tracing::info!(repositories = ?repos, "tracking git repositories");
+                tracing::info!(repositories = ?display_repositories(&repos), "tracking git repositories");
                 self.repos = repos;
             }
             self.discovered_at = Some(Instant::now());
@@ -304,6 +304,11 @@ async fn git(dir: &Path, args: &[&str]) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// Repository prefixes for people: the workspace root (`""`) reads as `.`.
+fn display_repositories(repos: &[String]) -> Vec<&str> {
+    repos.iter().map(|repo| if repo.is_empty() { "." } else { repo.as_str() }).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,6 +319,12 @@ mod tests {
 
     fn snapshot(entries: &[(&str, Fingerprint)]) -> Snapshot {
         entries.iter().map(|(p, f)| ((*p).to_owned(), *f)).collect()
+    }
+
+    #[test]
+    fn the_root_repository_is_logged_as_a_dot() {
+        let repos = vec![String::new(), "services/api".to_owned()];
+        assert_eq!(display_repositories(&repos), [".", "services/api"]);
     }
 
     #[test]
