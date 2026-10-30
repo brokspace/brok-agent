@@ -33,6 +33,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: brok-agent
+      - name: Cargo.lock has no local patches
+        working-directory: brok-agent
+        shell: bash
+        # A local polyrepo build (brokspace/.cargo/config.toml patching
+        # brok-sdk) records `[[patch.unused]]`; `--locked` accepts it, but
+        # `cargo publish` rewrites the file and refuses to run.
+        run: |
+          if grep -q '^\[\[patch' Cargo.lock; then
+            echo "::error file=Cargo.lock::Cargo.lock contains a [[patch...]] entry from a local build; regenerate it without the local patch"
+            exit 1
+          fi
       - name: Format
         working-directory: brok-agent
         run: cargo fmt --check
