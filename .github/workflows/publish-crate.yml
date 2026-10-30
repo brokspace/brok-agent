@@ -39,4 +39,7 @@ jobs:
             echo "brok-agent $version is already published"
             exit 0
           fi
-          cargo publish --no-verify
+          # --allow-dirty: cargo may rewrite Cargo.lock while packaging (v0.2.1
+          # was tagged with a `[[patch.unused]]` entry it drops); the
+          # checkout itself is the clean tag.
+          cargo publish --no-verify --allow-dirty
