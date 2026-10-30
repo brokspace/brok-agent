@@ -1,6 +1,6 @@
 {
   "name": "brok-agent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Default Brokspace system shard: git change tracking, pre-indexation review and RAG answers",
   "authors": [
     "Brokspace contributors"
