@@ -124,7 +124,8 @@ You can also run it in your terminal while the bus is up: disable it in `brok.ym
 
 ## Releasing
 
-Push a `vX.Y.Z` tag. The release workflow builds binaries for Linux, macOS and Windows (x86_64 and
+Bump the version in a PR to `staging`, merge the release PR into `main`, then push a `vX.Y.Z` tag on
+`main` (`git tag vX.Y.Z origin/main && git push origin vX.Y.Z`). The release workflow builds binaries for Linux, macOS and Windows (x86_64 and
 aarch64), attaches them with `.sha256` files and prints the `releases` block to paste into
 `shard.json`, so `brok shard install` downloads a checksum-verified binary instead of compiling.
 
