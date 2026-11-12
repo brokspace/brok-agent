@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+
+- The Linux x86_64 binary ran only on the newest distributions: it was built
+  on `ubuntu-latest` and needed its glibc (2.43) and libssl 3. It is now built
+  on Ubuntu 20.04 with OpenSSL linked in, so it runs on glibc 2.31 and newer
+  (Ubuntu 20.04+, Debian 11+). The release fails if it needs more.
+
+### Added
+
+- Cargo feature `vendored-openssl`: builds OpenSSL into the binary instead of
+  using the system libssl.
+
 ## [0.2.1] - 2026-10-30
 
 ### Fixed
