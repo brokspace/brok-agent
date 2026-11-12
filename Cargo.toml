@@ -11,11 +11,17 @@ readme = "README.md"
 keywords = ["brokspace", "rag", "llm", "agent", "shard"]
 categories = ["development-tools", "command-line-utilities"]
 
+[features]
+# Builds OpenSSL into the binary (needs perl and a C compiler), so the release
+# binary does not depend on the libssl version of the machine it runs on.
+vendored-openssl = ["dep:openssl", "openssl/vendored"]
+
 [dependencies]
 anyhow = "1.0"
 brok-sdk = "0.1.1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 globset = "0.4"
+openssl = { version = "0.10", optional = true }
 regex = "1.11"
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls", "http2"] }
 serde = { version = "1.0", features = ["derive"] }
