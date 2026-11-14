@@ -1,9 +1,10 @@
 name: Release
 
 # Push a tag such as `v0.1.0` to build binaries for every platform and attach
-# them, with `.sha256` checksums, to the GitHub release. The final job prints
-# the `releases` block to paste into shard.json so `brok shard install` can
-# download a verified binary instead of compiling from source.
+# them, with `.sha256` checksums, to the GitHub release. Then the binaries are
+# pinned in shard.json (`releases`, through a PR into staging) so `brok shard
+# install` can download a verified binary instead of compiling from source, and
+# the crate is published to crates.io. The Promote workflow pushes the tag.
 
 on:
   push:
@@ -102,32 +103,59 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --repo "$GITHUB_REPOSITORY" --clobber
 
-  manifest-snippet:
-    needs: build
+  # shard.json pins the release binaries (url + sha256) so `brok shard
+  # install` downloads a verified binary. With the brokspace-bot secrets this
+  # opens a PR into staging that merges itself; without them it prints the
+  # block to paste.
+  pin-binaries:
+    needs: publish
     runs-on: ubuntu-latest
+    env:
+      HAS_BOT: ${{ secrets.BROKSPACE_BOT_KEY != '' }}
     steps:
-      - name: Print the shard.json `releases` block
+      - name: Bot token
+        id: bot
+        if: env.HAS_BOT == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.BROKSPACE_BOT_ID }}
+          private-key: ${{ secrets.BROKSPACE_BOT_KEY }}
+      - uses: actions/checkout@v7
+        with:
+          ref: staging
+          token: ${{ steps.bot.outputs.token || github.token }}
+      - name: The releases block
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir assets && cd assets
-          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256'
+          mkdir -p "$RUNNER_TEMP/assets"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256' --dir "$RUNNER_TEMP/assets"
           base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
-          {
-            echo '```json'
-            echo '"releases": {'
-            first=1
-            for f in *.sha256; do
-              asset="${f%.sha256}"; platform="${asset#$BIN-}"; platform="${platform%.exe}"
-              [ $first -eq 1 ] || echo ','
-              first=0
-              printf '  "%s": { "url": "%s/%s", "sha256": "%s" }' "$platform" "$base" "$asset" "$(cat "$f")"
-            done
-            echo; echo '}'; echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          releases='{}'
+          for f in "$RUNNER_TEMP"/assets/*.sha256; do
+            asset="$(basename "${f%.sha256}")"; platform="${asset#$BIN-}"; platform="${platform%.exe}"
+            releases=$(jq --arg p "$platform" --arg u "$base/$asset" --arg s "$(cut -d' ' -f1 "$f")" '. + {($p): {url: $u, sha256: $s}}' <<<"$releases")
+          done
+          jq --argjson r "$releases" '.releases = $r' shard.json > shard.json.new && mv shard.json.new shard.json
+          { echo '```json'; jq '{releases}' shard.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Open the PR
+        if: env.HAS_BOT == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          BOT_SLUG: ${{ steps.bot.outputs.app-slug }}
+        run: |
+          if git diff --quiet shard.json; then echo "shard.json already pins $GITHUB_REF_NAME"; exit 0; fi
+          id=$(gh api "users/${BOT_SLUG}[bot]" --jq .id)
+          git config user.name "${BOT_SLUG}[bot]"
+          git config user.email "${id}+${BOT_SLUG}[bot]@users.noreply.github.com"
+          branch="release/pin-$GITHUB_REF_NAME"
+          git switch -c "$branch"
+          git commit -am "chore: pin the $GITHUB_REF_NAME release binaries in shard.json"
+          git push --force origin "$branch"
+          url=$(gh pr create --base staging --head "$branch" --title "chore: pin the $GITHUB_REF_NAME release binaries in shard.json" \
+            --body "Points \`releases\` in shard.json at the $GITHUB_REF_NAME binaries and their checksums. Opened by the Release workflow; merges itself once green.")
+          gh pr merge "$url" --auto --squash
 
-  # Assets are uploaded to a draft; publish only when every platform built,
-  # so `releases/latest/download/...` (used by the installers) never breaks.
   publish:
     needs: build
     runs-on: ubuntu-latest
@@ -136,3 +164,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+  # crates.io, once the GitHub release is out.
+  crates:
+    needs: publish
+    uses: ./.github/workflows/publish-crate.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
