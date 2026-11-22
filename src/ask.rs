@@ -13,6 +13,7 @@ use anyhow::Context;
 use brok_sdk::prelude::*;
 use futures_util::StreamExt;
 
+use crate::context::{Limit, MESSAGE_OVERHEAD_TOKENS, TokenUsage, deduplicate, estimate_tokens};
 use crate::guardrails::{redact_secrets, validate_prompt};
 use crate::llm::{LlmClient, Message};
 use crate::settings::{AgentSettings, LlmConfig};
@@ -35,12 +36,14 @@ pub struct AssembledContext {
     pub redactions: usize,
 }
 
-/// Renders search hits as Markdown, stopping before `max_chars` characters,
-/// and redacts secrets. The first hit is truncated rather than dropped so
-/// there is always some context when anything was found.
-pub fn assemble_context(hits: &[SearchHit], max_chars: usize) -> AssembledContext {
+/// Renders search hits as Markdown within `limit`, and redacts secrets.
+/// A hit that does not fit is skipped and smaller, lower ranked ones still
+/// get their chance; the first hit is truncated rather than dropped so there
+/// is always some context when anything was found. Output follows rank order.
+pub fn assemble_limited(hits: &[SearchHit], limit: Limit) -> AssembledContext {
     let mut context = AssembledContext::default();
     let mut used = 0;
+    let max = limit.amount();
     for hit in hits {
         let symbol = hit.symbol.as_deref().map(|s| format!(" ({s})")).unwrap_or_default();
         let mut block = format!(
@@ -51,15 +54,19 @@ pub fn assemble_context(hits: &[SearchHit], max_chars: usize) -> AssembledContex
             fence_language(&hit.language),
             hit.content.trim_end()
         );
-        let len = block.chars().count();
-        if used + len > max_chars {
-            if !context.sources.is_empty() || max_chars == 0 {
+        let mut cost = limit.cost(&block);
+        if used + cost > max {
+            if max == 0 {
                 break;
             }
-            block = block.chars().take(max_chars).collect();
+            if !context.sources.is_empty() {
+                continue;
+            }
+            block = block.chars().take(limit.with_amount(max).max_chars()).collect();
             block.push_str("\n```\n");
+            cost = limit.cost(&block).min(max);
         }
-        used += len;
+        used += cost;
         context.text.push_str(&block);
         context.sources.push(SourceRef {
             path: hit.path.clone(),
@@ -72,6 +79,12 @@ pub fn assemble_context(hits: &[SearchHit], max_chars: usize) -> AssembledContex
     context.text = text;
     context.redactions = redactions;
     context
+}
+
+/// [`assemble_limited`] with a character limit.
+#[cfg(test)]
+fn assemble_context(hits: &[SearchHit], max_chars: usize) -> AssembledContext {
+    assemble_limited(hits, Limit::Chars(max_chars))
 }
 
 /// The user message combining question and context.
@@ -114,13 +127,27 @@ async fn answer(
     let ask: AskRequest = request.decode().context("malformed agent:ask payload")?;
     validate_prompt(&ask.prompt)?;
     let (provider_name, provider) = llm.resolve(ask.provider.as_deref())?;
-    let model = LlmClient::new(provider)?;
+    let mut provider = provider.clone();
+    let tuning = &settings.context;
+    if tuning.max_input_tokens.is_some() && provider.max_tokens.is_none() {
+        provider.max_tokens = tuning.reserved_output_tokens;
+    }
+    let model = LlmClient::new(&provider)?;
+
+    let base = settings.system_prompt.as_deref().unwrap_or(DEFAULT_SYSTEM_PROMPT);
+    let system = system_prompt(base, ask.skill.as_ref());
+    if let Some(skill) = &ask.skill {
+        tracing::info!(skill = %skill.name, "running skill");
+    }
+    let budget = Budget::plan(settings, &system, &ask);
 
     let limit = ask.context_chunks.unwrap_or(settings.context_chunks);
-    let hits = if limit == 0 {
+    let candidates = if budget.adaptive { (limit * 2).min(64) } else { limit };
+    let mut hits = if candidates == 0 {
         Vec::new()
     } else {
-        let search = SearchRequest { query: retrieval_query(&ask.prompt, &ask.history), limit, focus: None };
+        let search =
+            SearchRequest { query: retrieval_query(&ask.prompt, &ask.history), limit: candidates, focus: None };
         match client.call::<SearchRequest, SearchResults>(&search, SEARCH_TIMEOUT).await {
             Ok(results) => results.hits,
             Err(e) => {
@@ -129,18 +156,28 @@ async fn answer(
             }
         }
     };
-    let context = assemble_context(&hits, settings.max_context_chars);
+    if tuning.deduplicate {
+        hits = deduplicate(hits);
+    }
+    let context = assemble_limited(&hits, budget.context);
     if context.redactions > 0 {
         tracing::info!(count = context.redactions, "redacted secrets from the context");
     }
 
-    let base = settings.system_prompt.as_deref().unwrap_or(DEFAULT_SYSTEM_PROMPT);
-    let system = system_prompt(base, ask.skill.as_ref());
-    if let Some(skill) = &ask.skill {
-        tracing::info!(skill = %skill.name, "running skill");
-    }
+    let history = history_messages(&ask.history, budget.history);
+    let usage = budget.usage_of(&system, &history, &ask.prompt, &context.text);
+    tracing::info!(
+        estimated_prompt_tokens = usage.total(),
+        system = usage.system,
+        history = usage.history,
+        question = usage.question,
+        context = usage.context,
+        budget = budget.max_input_tokens,
+        sources = context.sources.len(),
+        "prompt assembled"
+    );
     let mut messages = vec![Message::system(&system)];
-    messages.extend(history_messages(&ask.history));
+    messages.extend(history);
     messages.push(Message::user(user_message(&ask.prompt, &context.text)));
     let mut deltas = pin!(model.stream(&messages).await?);
     while let Some(delta) = deltas.next().await {
@@ -151,19 +188,74 @@ async fn answer(
 
 /// Earlier turns kept for a follow-up question.
 const MAX_HISTORY_TURNS: usize = 12;
-/// Character budget for earlier turns (the newest are kept).
+/// Character budget for earlier turns when no token budget is configured.
 const MAX_HISTORY_CHARS: usize = 12_000;
 /// Prompts shorter than this are treated as follow-ups for retrieval.
 const FOLLOW_UP_CHARS: usize = 40;
+/// Tokens of the fixed framing around the context and the question.
+const FRAMING_TOKENS: usize = 16;
+
+/// How the prompt is split between its parts.
+#[derive(Debug, Clone, Copy)]
+struct Budget {
+    /// Limit of the conversation history.
+    history: Limit,
+    /// Limit of the retrieved context.
+    context: Limit,
+    /// Whole-prompt budget, when one is configured.
+    max_input_tokens: Option<usize>,
+    /// Retrieve extra candidates and keep the best that fit.
+    adaptive: bool,
+}
+
+impl Budget {
+    /// Without `max_input_tokens` the legacy character limits apply. With it,
+    /// the fixed parts (system prompt, skill, question) are paid first, then
+    /// history up to `max_history_tokens`, and retrieved context gets the rest.
+    fn plan(settings: &AgentSettings, system: &str, ask: &AskRequest) -> Self {
+        let tuning = &settings.context;
+        let Some(max) = tuning.max_input_tokens else {
+            return Self {
+                history: Limit::Chars(MAX_HISTORY_CHARS),
+                context: Limit::Chars(settings.max_context_chars),
+                max_input_tokens: None,
+                adaptive: false,
+            };
+        };
+        let fixed = estimate_message(system) + estimate_message(&ask.prompt) + FRAMING_TOKENS;
+        let remaining = max.saturating_sub(fixed);
+        let history = Limit::Tokens(tuning.max_history_tokens.min(remaining));
+        let kept: usize = history_messages(&ask.history, history).iter().map(|m| estimate_message(&m.content)).sum();
+        Self {
+            history,
+            context: Limit::Tokens(remaining.saturating_sub(kept)),
+            max_input_tokens: Some(max),
+            adaptive: tuning.adaptive_retrieval,
+        }
+    }
+
+    fn usage_of(&self, system: &str, history: &[Message], prompt: &str, context: &str) -> TokenUsage {
+        TokenUsage {
+            system: estimate_message(system),
+            history: history.iter().map(|m| estimate_message(&m.content)).sum(),
+            question: estimate_message(prompt) + FRAMING_TOKENS,
+            context: estimate_tokens(context),
+        }
+    }
+}
+
+fn estimate_message(text: &str) -> usize {
+    estimate_tokens(text) + MESSAGE_OVERHEAD_TOKENS
+}
 
 /// The conversation so far as chat messages, oldest first, keeping only the
-/// newest turns that fit the turn and character budgets.
-fn history_messages(history: &[ChatTurn]) -> Vec<Message> {
+/// newest turns that fit the turn count and `limit`.
+fn history_messages(history: &[ChatTurn], limit: Limit) -> Vec<Message> {
     let mut kept = Vec::new();
-    let mut chars = 0;
+    let mut used = 0;
     for turn in history.iter().rev().take(MAX_HISTORY_TURNS) {
-        chars += turn.content.chars().count();
-        if chars > MAX_HISTORY_CHARS {
+        used += limit.cost(&turn.content);
+        if used > limit.amount() {
             break;
         }
         kept.push(match turn.role {
@@ -214,7 +306,7 @@ mod tests {
         let history: Vec<ChatTurn> = (0..20)
             .map(|i| turn(if i % 2 == 0 { ChatRole::User } else { ChatRole::Assistant }, &format!("m{i}")))
             .collect();
-        let messages = history_messages(&history);
+        let messages = history_messages(&history, Limit::Chars(MAX_HISTORY_CHARS));
         assert_eq!(messages.len(), MAX_HISTORY_TURNS);
         assert_eq!(messages.first().unwrap().content, "m8");
         assert_eq!(messages.last().unwrap(), &Message::assistant("m19"));
@@ -225,9 +317,9 @@ mod tests {
     fn history_respects_the_character_budget() {
         let big = "x".repeat(MAX_HISTORY_CHARS - 10);
         let history = vec![turn(ChatRole::User, &big), turn(ChatRole::Assistant, "short answer")];
-        let messages = history_messages(&history);
+        let messages = history_messages(&history, Limit::Chars(MAX_HISTORY_CHARS));
         assert_eq!(messages, vec![Message::assistant("short answer")]);
-        assert!(history_messages(&[]).is_empty());
+        assert!(history_messages(&[], Limit::Chars(1)).is_empty());
     }
 
     #[test]
@@ -292,6 +384,67 @@ mod tests {
         let ctx = assemble_context(&[hit("cfg.rs", "const KEY: &str = \"AKIAABCDEFGHIJKLMNOP\";")], 10_000);
         assert_eq!(ctx.redactions, 1);
         assert!(!ctx.text.contains("AKIA"));
+    }
+
+    fn ask(prompt: &str) -> AskRequest {
+        AskRequest { prompt: prompt.into(), provider: None, context_chunks: None, skill: None, history: Vec::new() }
+    }
+
+    fn token_settings(max: usize) -> AgentSettings {
+        let mut s = AgentSettings::default();
+        s.context.max_input_tokens = Some(max);
+        s
+    }
+
+    #[test]
+    fn without_max_input_tokens_the_character_limits_apply() {
+        let budget = Budget::plan(&AgentSettings::default(), "sys", &ask("q"));
+        assert_eq!(budget.context, Limit::Chars(24_000));
+        assert_eq!(budget.history, Limit::Chars(MAX_HISTORY_CHARS));
+        assert!(!budget.adaptive && budget.max_input_tokens.is_none());
+    }
+
+    #[test]
+    fn the_token_budget_pays_fixed_parts_first() {
+        let system = "s".repeat(300);
+        let budget = Budget::plan(&token_settings(1000), &system, &ask(&"q".repeat(90)));
+        let fixed = estimate_message(&system) + estimate_message(&"q".repeat(90)) + FRAMING_TOKENS;
+        assert_eq!(budget.context, Limit::Tokens(1000 - fixed));
+        assert!(budget.adaptive);
+        // A budget smaller than the fixed parts leaves no context, without underflow.
+        assert_eq!(Budget::plan(&token_settings(10), &system, &ask("q")).context, Limit::Tokens(0));
+    }
+
+    #[test]
+    fn history_takes_its_share_before_context() {
+        let history = vec![turn(ChatRole::User, &"h".repeat(900)), turn(ChatRole::Assistant, &"a".repeat(300))];
+        let mut request = ask("q");
+        request.history = history;
+        let budget = Budget::plan(&token_settings(2000), "sys", &request);
+        // Both turns fit the 1200 token history cap (300 + 100 tokens).
+        assert!(matches!(budget.context, Limit::Tokens(n) if n < 2000 - 400));
+        let mut tight = token_settings(2000);
+        tight.context.max_history_tokens = 150;
+        let kept = history_messages(&request.history, Limit::Tokens(150));
+        assert_eq!(kept.len(), 1, "only the newest turn fits");
+        assert_eq!(Budget::plan(&tight, "sys", &request).history, Limit::Tokens(150));
+    }
+
+    #[test]
+    fn a_big_hit_is_skipped_for_smaller_relevant_ones() {
+        let hits = vec![hit("a.rs", &"a".repeat(60)), hit("big.rs", &"b".repeat(3000)), hit("c.rs", &"c".repeat(60))];
+        let ctx = assemble_limited(&hits, Limit::Tokens(120));
+        let paths: Vec<_> = ctx.sources.iter().map(|s| s.path.as_str()).collect();
+        assert_eq!(paths, ["a.rs", "c.rs"]);
+        assert!(estimate_tokens(&ctx.text) <= 120);
+    }
+
+    #[test]
+    fn the_estimated_context_never_exceeds_the_token_limit() {
+        let hits = vec![hit("a.rs", &"x".repeat(5000))];
+        let ctx = assemble_limited(&hits, Limit::Tokens(50));
+        assert_eq!(ctx.sources.len(), 1);
+        assert!(estimate_tokens(&ctx.text) <= 55, "{}", estimate_tokens(&ctx.text));
     }
 
     #[test]

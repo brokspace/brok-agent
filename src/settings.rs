@@ -47,6 +47,8 @@ pub struct AgentSettings {
     pub context_chunks: usize,
     /// Upper bound of context characters sent to the model.
     pub max_context_chars: usize,
+    /// Token budget of the prompt (see [`ContextSettings`]).
+    pub context: ContextSettings,
     /// Pre-indexation review.
     pub review: ReviewSettings,
     /// Replaces the default system prompt.
@@ -62,8 +64,43 @@ impl Default for AgentSettings {
             reconcile_interval_secs: 300,
             context_chunks: 8,
             max_context_chars: 24_000,
+            context: ContextSettings::default(),
             review: ReviewSettings::default(),
             system_prompt: None,
+        }
+    }
+}
+
+/// Token budget for the prompt sent to the model. Without
+/// `max_input_tokens` the character limits `context_chunks` and
+/// `max_context_chars` keep working exactly as before.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ContextSettings {
+    /// Estimated tokens the whole prompt may use (system prompt, skill,
+    /// history, question and retrieved context). Unset keeps the character
+    /// limits.
+    pub max_input_tokens: Option<usize>,
+    /// Tokens kept for the answer; sent as `max_tokens` when the provider
+    /// does not set its own. Only used together with `max_input_tokens`.
+    pub reserved_output_tokens: Option<u32>,
+    /// Estimated tokens of conversation history (newest turns win).
+    pub max_history_tokens: usize,
+    /// Drop retrieved chunks that overlap a better ranked one.
+    pub deduplicate: bool,
+    /// With a token budget, retrieve extra candidates and keep the best that
+    /// fit, instead of the first `context_chunks`.
+    pub adaptive_retrieval: bool,
+}
+
+impl Default for ContextSettings {
+    fn default() -> Self {
+        Self {
+            max_input_tokens: None,
+            reserved_output_tokens: None,
+            max_history_tokens: 1200,
+            deduplicate: true,
+            adaptive_retrieval: true,
         }
     }
 }
@@ -178,6 +215,16 @@ mod tests {
         assert!(s.review.enabled);
         assert_eq!(s.review.include, vec!["src/api/**"]);
         assert_eq!(s.context_chunks, 8);
+    }
+
+    #[test]
+    fn context_settings_default_to_the_legacy_limits() {
+        let s = AgentSettings::default().context;
+        assert_eq!(s.max_input_tokens, None);
+        assert!(s.deduplicate && s.adaptive_retrieval);
+        let s = AgentSettings::from_value(&json!({ "context": { "max_input_tokens": 6000 } })).unwrap();
+        assert_eq!(s.context.max_input_tokens, Some(6000));
+        assert_eq!(s.context.max_history_tokens, 1200);
     }
 
     #[test]

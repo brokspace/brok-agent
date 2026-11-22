@@ -8,6 +8,7 @@
 //! It is launched by `brok run`; see the README for running it standalone.
 
 mod ask;
+mod context;
 mod guardrails;
 mod llm;
 mod review;

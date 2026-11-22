@@ -8,6 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+- Token-aware context assembly (`context.max_input_tokens` and related
+  settings): the prompt, history and retrieved chunks share a conservative
+  token budget, overlapping chunks are dropped, chunks that do not fit are
+  skipped instead of ending the selection, and the estimated tokens of each
+  part are logged (counts only). Without it the character limits behave as
+  before (brokspace/brok-agent#23).
 - Event-driven change tracking: the agent watches the workspace with the
   operating system's file events (new `watch` setting: `auto`, `native` or
   `polling`) instead of asking git every 5 seconds. An idle workspace now
