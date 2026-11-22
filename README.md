@@ -68,7 +68,12 @@ shards:
 | `debounce_ms` | `300` | Quiet time after the last event before a burst of changes is scanned (a build or a checkout touches thousands of files). |
 | `reconcile_interval_secs` | `300` | In `auto` mode, how often a full scan recovers from events the OS did not deliver. `0` turns it off. |
 | `context_chunks` | `8` | Chunks retrieved per question (overridable per request). |
-| `max_context_chars` | `24000` | Context budget sent to the model. |
+| `max_context_chars` | `24000` | Context budget sent to the model, in characters. Used when `context.max_input_tokens` is unset. |
+| `context.max_input_tokens` | unset | Estimated tokens the whole prompt may use. Turns on token budgeting (below). |
+| `context.reserved_output_tokens` | unset | Sent as `max_tokens` when the provider sets none (token budgeting only). |
+| `context.max_history_tokens` | `1200` | Share of the budget for earlier turns; the newest win. |
+| `context.deduplicate` | `true` | Drop chunks overlapping a better ranked one (same file and lines, or same text). |
+| `context.adaptive_retrieval` | `true` | With a token budget, fetch twice the chunks and keep the best that fit. |
 | `system_prompt` | built in | Replaces the default system prompt. |
 | `review.enabled` | `false` | Turns the pre-indexation review on. |
 | `review.include` / `review.exclude` | `["src/api/**"]` / `["**/*.md"]` | Globs relative to the workspace root (`*` does not cross `/`). |
@@ -83,6 +88,29 @@ event only makes the agent run its usual scan.
 
 API keys are **never** stored in `brok.yml`: a provider names the environment variable that holds its key
 (`api_key_env`). The shard manifest only lets `*_API_KEY`, `OPENAI_*` and proxy variables through.
+
+### Token budget
+
+Set `context.max_input_tokens` and the prompt is built to fit it: the system prompt, the skill,
+the question and the history are counted first, then retrieved chunks fill what is left, best ranked
+first. A chunk that does not fit is skipped and smaller ones still get a chance, so one huge file never
+crowds out the rest. Source references (`path:start-end`) are kept on every chunk.
+
+No tokenizer is bundled. The estimate is conservative (one token per 3 ASCII characters, one per other
+character), so it over-counts and a prompt that fits the estimate fits the model. Each answer logs the
+estimated tokens of every part (`prompt assembled`): counts only, never prompt or source text. Without
+`max_input_tokens` the character limits behave as before. Actual usage reported by the provider is not
+collected yet (it needs a field in the `agent:ask.done` payload of `brok-sdk`).
+
+```yaml
+shards:
+  brok-agent:
+    settings:
+      context:
+        max_input_tokens: 6000
+        reserved_output_tokens: 1500
+        max_history_tokens: 1200
+```
 
 ## Events
 
