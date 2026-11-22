@@ -51,7 +51,7 @@ shards:
   brok-agent:
     enabled: true
     settings:
-      watch_interval_secs: 5
+      watch: auto
       context_chunks: 8
       max_context_chars: 24000
       review:
@@ -63,7 +63,10 @@ shards:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `watch_interval_secs` | `5` | Seconds between two git scans. |
+| `watch` | `auto` | How changes are detected. `auto`: file system events, plus a reconciliation scan every `reconcile_interval_secs`. `native`: events only (a scan at start and after lost events). `polling`: a scan every `watch_interval_secs`, as before. If the workspace cannot be watched (for example the system's watch limit), the agent logs one warning and polls. |
+| `watch_interval_secs` | `5` | Seconds between two git scans when polling. |
+| `debounce_ms` | `300` | Quiet time after the last event before a burst of changes is scanned (a build or a checkout touches thousands of files). |
+| `reconcile_interval_secs` | `300` | In `auto` mode, how often a full scan recovers from events the OS did not deliver. `0` turns it off. |
 | `context_chunks` | `8` | Chunks retrieved per question (overridable per request). |
 | `max_context_chars` | `24000` | Context budget sent to the model. |
 | `system_prompt` | built in | Replaces the default system prompt. |
@@ -71,6 +74,12 @@ shards:
 | `review.include` / `review.exclude` | `["src/api/**"]` / `["**/*.md"]` | Globs relative to the workspace root (`*` does not cross `/`). |
 | `review.provider` | `llm.default` | Provider used for reviews. |
 | `review.max_file_kb` | `32` | Bytes of each file sent for review. |
+
+With events, an idle workspace costs no `git` process at all (polling starts about three per repository every
+`watch_interval_secs`). Directories that are ignored by git, hidden build output (`node_modules`, `target`, `dist`,
+`build`, `vendor`) and `.brokspace/` are not watched; commits, pulls, checkouts and rebases are noticed through each
+repository's `HEAD` and refs, including those of submodules and linked worktrees. git stays the source of truth: an
+event only makes the agent run its usual scan.
 
 API keys are **never** stored in `brok.yml`: a provider names the environment variable that holds its key
 (`api_key_env`). The shard manifest only lets `*_API_KEY`, `OPENAI_*` and proxy variables through.

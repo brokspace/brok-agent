@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde_json::Value;
 
+pub use crate::watch::Strategy;
+
 /// Errors raised while reading settings or resolving a provider.
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
@@ -31,8 +33,16 @@ pub enum SettingsError {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct AgentSettings {
-    /// Seconds between two `git diff` scans.
+    /// How changes are detected: `auto` (file system events plus a periodic
+    /// reconciliation scan), `native` (events only) or `polling`.
+    pub watch: Strategy,
+    /// Seconds between two `git diff` scans when polling.
     pub watch_interval_secs: u64,
+    /// Milliseconds without a new event before a burst of changes is scanned.
+    pub debounce_ms: u64,
+    /// Seconds between reconciliation scans in `auto` mode, which recover
+    /// from lost events (0 turns them off).
+    pub reconcile_interval_secs: u64,
     /// Chunks retrieved for each question.
     pub context_chunks: usize,
     /// Upper bound of context characters sent to the model.
@@ -46,7 +56,10 @@ pub struct AgentSettings {
 impl Default for AgentSettings {
     fn default() -> Self {
         Self {
+            watch: Strategy::Auto,
             watch_interval_secs: 5,
+            debounce_ms: 300,
+            reconcile_interval_secs: 300,
             context_chunks: 8,
             max_context_chars: 24_000,
             review: ReviewSettings::default(),
