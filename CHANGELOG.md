@@ -8,6 +8,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+- Event-driven change tracking: the agent watches the workspace with the
+  operating system's file events (new `watch` setting: `auto`, `native` or
+  `polling`) instead of asking git every 5 seconds. An idle workspace now
+  starts no `git` process (it was about 18 in 30 seconds for a one-repository
+  workspace), and an edit reaches the index in under a second. Events are
+  debounced (`debounce_ms`), the queue is bounded, lost events trigger a full
+  scan, `auto` also reconciles every `reconcile_interval_secs`, and the agent
+  falls back to polling with a warning when the workspace cannot be watched.
+  `watch: polling` keeps the previous behavior.
 - Release builds attach Debian packages (`brok-agent_<version>_amd64.deb`,
   `arm64`) next to the standalone binaries.
 
