@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- Release builds attach Debian packages (`brok-agent_<version>_amd64.deb`,
+  `arm64`) next to the standalone binaries.
+
+### Changed
+
+- crates.io publishing uses Trusted Publishing (OIDC) instead of a
+  `CARGO_REGISTRY_TOKEN` secret, and starts on the release tag but waits for
+  the GitHub release to be published.
+- The Linux ARM64 binary is built with vendored OpenSSL and checked against
+  its glibc floor (2.39), like x86_64.
+
 ### Fixed
 
 - The Linux x86_64 binary ran only on the newest distributions: it was built
