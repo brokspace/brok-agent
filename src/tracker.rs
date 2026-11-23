@@ -9,8 +9,9 @@
 //! - did `HEAD` move (commit, pull, checkout, rebase)? Then the files that
 //!   differ between the old and the new commit changed as well.
 //!
-//! Only the difference is published, so an idle workspace costs a couple of
-//! `git` invocations per repository.
+//! Only the difference is published. A scan costs a few `git` invocations per
+//! repository; *when* to scan is decided elsewhere: by file system events
+//! (`watch.rs`, the default) or by a timer (`watch: polling`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -108,9 +109,14 @@ impl Tracker {
     }
 
     /// Repository prefixes currently tracked (`""` = workspace root).
-    #[cfg(test)]
     pub fn repositories(&self) -> &[String] {
         &self.repos
+    }
+
+    /// Makes the next poll look for repositories again (a clone, a new
+    /// submodule or a removed repository was noticed).
+    pub fn invalidate_repositories(&mut self) {
+        self.discovered_at = None;
     }
 
     /// Scans the workspace and returns what changed since the last poll.

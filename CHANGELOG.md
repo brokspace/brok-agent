@@ -6,6 +6,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-23
+
+### Added
+
+- Token-aware context assembly (`context.max_input_tokens` and related
+  settings): the prompt, history and retrieved chunks share a conservative
+  token budget, overlapping chunks are dropped, chunks that do not fit are
+  skipped instead of ending the selection, and the estimated tokens of each
+  part are logged (counts only). Without it the character limits behave as
+  before (brokspace/brok-agent#23).
+- Event-driven change tracking: the agent watches the workspace with the
+  operating system's file events (new `watch` setting: `auto`, `native` or
+  `polling`) instead of asking git every 5 seconds. An idle workspace now
+  starts no `git` process (it was about 18 in 30 seconds for a one-repository
+  workspace), and an edit reaches the index in under a second. Events are
+  debounced (`debounce_ms`), the queue is bounded, lost events trigger a full
+  scan, `auto` also reconciles every `reconcile_interval_secs`, and the agent
+  falls back to polling with a warning when the workspace cannot be watched.
+  `watch: polling` keeps the previous behavior.
+- Release builds attach Debian packages (`brok-agent_<version>_amd64.deb`,
+  `arm64`) next to the standalone binaries.
+
+### Changed
+
+- crates.io publishing uses Trusted Publishing (OIDC) instead of a
+  `CARGO_REGISTRY_TOKEN` secret, and starts on the release tag but waits for
+  the GitHub release to be published.
+- The Linux ARM64 binary is built with vendored OpenSSL and checked against
+  its glibc floor (2.39), like x86_64.
+
 ### Fixed
 
 - The Linux x86_64 binary ran only on the newest distributions: it was built

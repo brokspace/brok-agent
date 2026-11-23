@@ -1,52 +1,84 @@
 name: Publish crate
 
 # Publishes brok-agent to crates.io from a release tag (`cargo install
-# brok-agent`). The Release workflow runs it after publishing the release;
-# to re-run it by hand:
+# brok-agent`), using crates.io Trusted Publishing (OIDC): no
+# CARGO_REGISTRY_TOKEN secret exists or is needed.
+#
+# This is a standalone workflow on purpose: a Trusted Publisher matches the
+# workflow file in the OIDC identity. Configure it on the brok-agent crate with
+# owner=brokspace, repository=brok-agent, workflow=publish-crate.yml,
+# environment=crates-io.
+#
+# It runs on the release tag, then waits for the Release workflow to publish
+# the GitHub release, so the crate is never published for a release whose
+# binaries failed to build. Re-run by hand with:
 #   gh workflow run publish-crate.yml -f tag=vX.Y.Z
-# Needs the CARGO_REGISTRY_TOKEN secret (organization or repository).
 
 on:
-  workflow_call:
-    inputs:
-      tag:
-        description: Release tag to publish (e.g. v0.2.0)
-        type: string
-        required: true
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to publish (e.g. v0.2.0)
+        description: Release tag to publish (e.g. v0.2.2)
         required: true
+        type: string
 
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
-      - name: Publish
+      - name: Wait for the GitHub release to be published
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "::error::CARGO_REGISTRY_TOKEN is not set (gh secret set CARGO_REGISTRY_TOKEN --org brokspace --visibility all)"
-            exit 1
-          fi
+          # The Release workflow publishes the draft only after every platform
+          # built. Give up after 90 minutes; the workflow can be re-run.
+          for _ in $(seq 1 180); do
+            draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+            [ "$draft" = "false" ] && exit 0
+            echo "release $TAG is not published yet ($draft); waiting"
+            sleep 30
+          done
+          echo "::error::release $TAG was not published within 90 minutes"; exit 1
+      - name: The tag matches the crate version
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          [ "v$version" = "$TAG" ] || { echo "::error::tag $TAG does not match brok-agent version $version"; exit 1; }
+      - name: Skip if this version is already published
+        id: published
+        run: |
           version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
           if curl -fsS -A "brokspace-release (github.com/brokspace/brok-agent)" "https://crates.io/api/v1/crates/brok-agent/$version" >/dev/null 2>&1; then
             echo "brok-agent $version is already published"
-            exit 0
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
           fi
-          # --allow-dirty: cargo may rewrite Cargo.lock while packaging (v0.2.1
-          # was tagged with a `[[patch.unused]]` entry it drops); the
-          # checkout itself is the clean tag.
-          cargo publish --no-verify --allow-dirty
+      - name: Authenticate with crates.io Trusted Publishing
+        id: auth
+        if: steps.published.outputs.published == 'false'
+        uses: rust-lang/crates-io-auth-action@v1
+      - name: Publish brok-agent
+        if: steps.published.outputs.published == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        # --allow-dirty: cargo may rewrite Cargo.lock while packaging (v0.2.1
+        # was tagged with a `[[patch.unused]]` entry it drops); the checkout
+        # itself is the clean tag.
+        run: cargo publish --no-verify --allow-dirty

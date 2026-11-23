@@ -4,7 +4,7 @@ name: Release
 # them, with `.sha256` checksums, to the GitHub release. Then the binaries are
 # pinned in shard.json (`releases`, through a PR into staging) so `brok shard
 # install` can download a verified binary instead of compiling from source, and
-# the crate is published to crates.io. The Promote workflow pushes the tag.
+# the crate is published to crates.io by publish-crate.yml (same tag). The Promote workflow pushes the tag.
 
 on:
   push:
@@ -33,8 +33,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { platform: linux-x86_64, os: ubuntu-latest, container: "ubuntu:20.04", max_glibc: "2.31", features: "--features vendored-openssl", target: x86_64-unknown-linux-gnu }
-          - { platform: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { platform: linux-x86_64, os: ubuntu-latest, container: "ubuntu:20.04", max_glibc: "2.31", deb_arch: amd64, deb_min_glibc: "2.31", features: "--features vendored-openssl", target: x86_64-unknown-linux-gnu }
+          # The ARM runner is Ubuntu 24.04, so its binary needs glibc 2.39+; the check below enforces it.
+          - { platform: linux-aarch64, os: ubuntu-24.04-arm, max_glibc: "2.39", deb_arch: arm64, deb_min_glibc: "2.39", features: "--features vendored-openssl", target: aarch64-unknown-linux-gnu }
           - { platform: macos-aarch64, os: macos-latest, target: aarch64-apple-darwin }
           - { platform: macos-x86_64, os: macos-latest, target: x86_64-apple-darwin }
           - { platform: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc, ext: .exe }
@@ -96,12 +97,24 @@ jobs:
           if command -v sha256sum >/dev/null; then sha256sum "$asset" | cut -d' ' -f1 > "$asset.sha256";
           else shasum -a 256 "$asset" | cut -d' ' -f1 > "$asset.sha256"; fi
           echo "ASSET=$asset" >> "$GITHUB_ENV"
+      - name: Build Debian package
+        if: startsWith(matrix.platform, 'linux-')
+        working-directory: brok-agent
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          scripts/package-deb.sh brok-agent "$version" "${{ matrix.deb_arch }}" "$ASSET" "libc6 (>= ${{ matrix.deb_min_glibc }}), libgcc-s1"
+          echo "DEB_ASSET=brok-agent_${version}_${{ matrix.deb_arch }}.deb" >> "$GITHUB_ENV"
       - name: Upload
         shell: bash
         working-directory: brok-agent
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+        run: |
+          assets=("$ASSET" "$ASSET.sha256")
+          # Linux jobs also upload the .deb built above.
+          if [ -n "${DEB_ASSET:-}" ]; then assets+=("$DEB_ASSET"); fi
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
 
   # shard.json pins the release binaries (url + sha256) so `brok shard
   # install` downloads a verified binary. With the brokspace-bot secrets this
@@ -164,11 +177,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
-
-  # crates.io, once the GitHub release is out.
-  crates:
-    needs: publish
-    uses: ./.github/workflows/publish-crate.yml
-    with:
-      tag: ${{ github.ref_name }}
-    secrets: inherit
