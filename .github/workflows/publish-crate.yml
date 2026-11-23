@@ -72,12 +72,15 @@ jobs:
           fi
       - name: Authenticate with crates.io Trusted Publishing
         id: auth
+        # Trusted Publishing when the crate has a Trusted Publisher; otherwise
+        # the CARGO_REGISTRY_TOKEN secret below is used.
+        continue-on-error: true
         if: steps.published.outputs.published == 'false'
         uses: rust-lang/crates-io-auth-action@v1
       - name: Publish brok-agent
         if: steps.published.outputs.published == 'false'
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
         # --allow-dirty: cargo may rewrite Cargo.lock while packaging (v0.2.1
         # was tagged with a `[[patch.unused]]` entry it drops); the checkout
         # itself is the clean tag.
