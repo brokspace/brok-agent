@@ -6,6 +6,8 @@
 //! unchanged. Nothing here keeps prompt or source text: only counts leave
 //! this module.
 
+use std::collections::BTreeSet;
+
 use brok_sdk::prelude::SearchHit;
 
 /// Characters per token assumed for ASCII text. Code and identifiers
@@ -109,6 +111,53 @@ pub fn deduplicate(hits: Vec<SearchHit>) -> Vec<SearchHit> {
     kept
 }
 
+/// How much a chunk of a file being changed is favored, and one of its tests.
+const MODIFIED_BOOST: f32 = 1.25;
+const TEST_BOOST: f32 = 1.15;
+
+/// Ranks chunks of the files in `dirty` (uncommitted work), and the tests of
+/// those files, a little higher; the order of everything else is kept. A boost,
+/// not a jump: a clearly better hit elsewhere still wins.
+pub fn prefer_modified(mut hits: Vec<SearchHit>, dirty: &BTreeSet<String>) -> Vec<SearchHit> {
+    if dirty.is_empty() {
+        return hits;
+    }
+    let stems: BTreeSet<String> = dirty.iter().filter_map(|path| stem(path)).filter(|s| s.len() > 2).collect();
+    for hit in &mut hits {
+        if dirty.contains(&hit.path) {
+            hit.score *= MODIFIED_BOOST;
+        } else if is_test_path(&hit.path) && stem(&hit.path).is_some_and(|s| stems.iter().any(|d| tests_stem(&s, d))) {
+            hit.score *= TEST_BOOST;
+        }
+    }
+    // A stable sort keeps the original order of equal scores.
+    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    hits
+}
+
+/// The file name without directories or extensions (`src/auth.test.ts` is `auth`).
+fn stem(path: &str) -> Option<String> {
+    let name = path.rsplit('/').next()?;
+    let stem = name.split('.').next()?;
+    (!stem.is_empty()).then(|| stem.to_lowercase())
+}
+
+fn is_test_path(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.split('/').any(|part| matches!(part, "test" | "tests" | "__tests__" | "spec" | "specs"))
+        || lower.rsplit('/').next().is_some_and(|name| {
+            name.contains("_test.") || name.contains(".test.") || name.contains(".spec.") || name.starts_with("test_")
+        })
+}
+
+/// Whether a test file stem names the file stem `target` (`auth_test`, `test_auth` and `auth` in `tests/`).
+fn tests_stem(test: &str, target: &str) -> bool {
+    test == target
+        || test.strip_suffix("_test") == Some(target)
+        || test.strip_prefix("test_") == Some(target)
+        || test.strip_suffix("_spec") == Some(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +209,43 @@ mod tests {
         let kept = deduplicate(hits);
         let ids: Vec<_> = kept.iter().map(|h| h.chunk_id.as_str()).collect();
         assert_eq!(ids, ["a.rs#10", "a.rs#41", "b.rs#10"]);
+    }
+
+    fn scored(path: &str, score: f32) -> SearchHit {
+        SearchHit { score, ..hit(path, 1, 5, path) }
+    }
+
+    #[test]
+    fn modified_files_and_their_tests_rank_a_little_higher() {
+        let dirty: BTreeSet<String> = ["src/auth.rs".to_owned()].into();
+        let hits = vec![
+            scored("src/billing.rs", 1.0),
+            scored("tests/auth.rs", 0.9),
+            scored("src/auth.rs", 0.85),
+            scored("src/other.rs", 0.8),
+        ];
+        let paths: Vec<_> = prefer_modified(hits, &dirty).into_iter().map(|h| h.path).collect();
+        // 0.85 * 1.25 and 0.9 * 1.15 pass 1.0; the unrelated files keep their order.
+        assert_eq!(paths, ["src/auth.rs", "tests/auth.rs", "src/billing.rs", "src/other.rs"]);
+    }
+
+    #[test]
+    fn a_clearly_better_hit_still_wins_and_nothing_changes_without_changes() {
+        let dirty: BTreeSet<String> = ["src/auth.rs".to_owned()].into();
+        let hits = vec![scored("src/billing.rs", 2.0), scored("src/auth.rs", 1.0)];
+        assert_eq!(prefer_modified(hits.clone(), &dirty)[0].path, "src/billing.rs");
+        let untouched = prefer_modified(hits.clone(), &BTreeSet::new());
+        assert_eq!(
+            untouched.iter().map(|h| &h.path).collect::<Vec<_>>(),
+            hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn recognizes_the_tests_of_a_file() {
+        assert!(is_test_path("src/auth_test.go") && is_test_path("web/auth.test.ts") && is_test_path("tests/x.rs"));
+        assert!(!is_test_path("src/latest.rs"));
+        assert!(tests_stem("auth_test", "auth") && tests_stem("test_auth", "auth") && tests_stem("auth", "auth"));
+        assert!(!tests_stem("author_test", "auth"));
     }
 }

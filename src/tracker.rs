@@ -109,6 +109,11 @@ impl Tracker {
     }
 
     /// Repository prefixes currently tracked (`""` = workspace root).
+    /// The files that are dirty now (uncommitted work), as of the last poll.
+    pub fn dirty(&self) -> BTreeSet<String> {
+        self.previous.keys().cloned().collect()
+    }
+
     pub fn repositories(&self) -> &[String] {
         &self.repos
     }

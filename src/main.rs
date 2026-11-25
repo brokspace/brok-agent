@@ -89,7 +89,14 @@ async fn run() -> anyhow::Result<()> {
         tracing::warn!("pre-indexation review disabled: {e:#}");
         None
     });
-    let tracking = tokio::spawn(track(client.clone(), context.workspace_root.clone(), Arc::clone(&settings), reviewer));
+    let dirty = ask::Dirty::default();
+    let tracking = tokio::spawn(track(
+        client.clone(),
+        context.workspace_root.clone(),
+        Arc::clone(&settings),
+        reviewer,
+        Arc::clone(&dirty),
+    ));
     tracing::info!(workspace = %context.workspace_root.display(), "brok-agent ready");
 
     loop {
@@ -104,7 +111,7 @@ async fn run() -> anyhow::Result<()> {
                     break;
                 }
                 Some(event) if event.is::<AskRequest>() => {
-                    tokio::spawn(ask::handle(client.clone(), event, Arc::clone(&settings), Arc::clone(&llm), members));
+                    tokio::spawn(ask::handle(client.clone(), event, Arc::clone(&settings), Arc::clone(&llm), members, Arc::clone(&dirty)));
                 }
                 Some(event) => tracing::debug!(topic = %event.topic, "ignoring event"),
             },
@@ -166,7 +173,13 @@ async fn start_trigger(root: &Path, settings: &AgentSettings) -> Trigger {
 /// reports a change (debounced), when events were lost, and, in `auto` mode,
 /// on a slow timer that catches anything the OS did not tell us. With
 /// `watch: polling` it runs on a timer, as before.
-async fn track(client: BrokClient, root: PathBuf, settings: Arc<AgentSettings>, reviewer: Option<Reviewer>) {
+async fn track(
+    client: BrokClient,
+    root: PathBuf,
+    settings: Arc<AgentSettings>,
+    reviewer: Option<Reviewer>,
+    dirty: ask::Dirty,
+) {
     let mut tracker = Tracker::new(root.clone());
     let mut trigger = start_trigger(&root, &settings).await;
     let debounce = Duration::from_millis(settings.debounce_ms.max(50));
@@ -226,6 +239,7 @@ async fn track(client: BrokClient, root: PathBuf, settings: Arc<AgentSettings>, 
                 continue;
             }
         };
+        *dirty.write().unwrap_or_else(std::sync::PoisonError::into_inner) = tracker.dirty();
         // New repositories need their git metadata watched.
         if let Trigger::Events { watcher, .. } = &mut trigger
             && let Err(e) = watcher.sync_repositories(tracker.repositories())
