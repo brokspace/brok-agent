@@ -78,6 +78,10 @@ async fn run() -> anyhow::Result<()> {
         BrokClient::connect_from_env(NAME, env!("CARGO_PKG_VERSION")).await.context("cannot join the brok bus")?;
     let context = client.context().clone();
     let settings = Arc::new(AgentSettings::from_value(&context.settings)?);
+    let members = settings.search_members && !context.members.is_empty();
+    if members {
+        tracing::info!(members = context.members.len(), "answers also draw on the Meta Workspace members");
+    }
     let llm = Arc::new(LlmConfig::from_value(&context.llm)?);
     client.subscribe([TopicPattern::new(topics::AGENT_ASK)?]).await?;
 
@@ -100,7 +104,7 @@ async fn run() -> anyhow::Result<()> {
                     break;
                 }
                 Some(event) if event.is::<AskRequest>() => {
-                    tokio::spawn(ask::handle(client.clone(), event, Arc::clone(&settings), Arc::clone(&llm)));
+                    tokio::spawn(ask::handle(client.clone(), event, Arc::clone(&settings), Arc::clone(&llm), members));
                 }
                 Some(event) => tracing::debug!(topic = %event.topic, "ignoring event"),
             },

@@ -18,7 +18,7 @@ vendored-openssl = ["dep:openssl", "openssl/vendored"]
 
 [dependencies]
 anyhow = "1.0"
-brok-sdk = "0.2.0"
+brok-sdk = "0.3.0"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 globset = "0.4"
 ignore = "0.4"
