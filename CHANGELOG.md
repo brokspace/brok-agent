@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+
+- A file moved with `git mv` (or moved and committed) left its old path in the index: git's rename detection listed only the new name, so the old file was never reported as deleted. Change tracking now asks git for changes without rename detection (brokspace/brok-agent#22).
+
 ## [0.4.0] - 2026-11-24
 
 ### Added
