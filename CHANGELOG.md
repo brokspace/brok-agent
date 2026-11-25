@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-24
+
 ### Added
 
 - In a Meta Workspace, answers also draw on the member repositories (`search_members`, on by default): the agent asks the index for `scope: workspace` when the context lists members, and sources are cited as `member:path`. Needs brok 0.7 or newer and brok-sdk 0.3; without members or with an older brok nothing changes.
