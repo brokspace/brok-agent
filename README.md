@@ -68,6 +68,7 @@ shards:
 | `debounce_ms` | `300` | Quiet time after the last event before a burst of changes is scanned (a build or a checkout touches thousands of files). |
 | `reconcile_interval_secs` | `300` | In `auto` mode, how often a full scan recovers from events the OS did not deliver. `0` turns it off. |
 | `context_chunks` | `8` | Chunks retrieved per question (overridable per request). |
+| `search_members` | `true` | In a Meta Workspace, also retrieve context from the member repositories (needs brok 0.7 or newer; hits are cited as `member:path`). With no members, or an older brok, answers use this workspace only. |
 | `max_context_chars` | `24000` | Context budget sent to the model, in characters. Used when `context.max_input_tokens` is unset. |
 | `context.max_input_tokens` | unset | Estimated tokens the whole prompt may use. Turns on token budgeting (below). |
 | `context.reserved_output_tokens` | unset | Sent as `max_tokens` when the provider sets none (token budgeting only). |
