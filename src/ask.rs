@@ -13,7 +13,7 @@ use anyhow::Context;
 use brok_sdk::prelude::*;
 use futures_util::StreamExt;
 
-use crate::context::{Limit, MESSAGE_OVERHEAD_TOKENS, TokenUsage, deduplicate, estimate_tokens};
+use crate::context::{Limit, MESSAGE_OVERHEAD_TOKENS, TokenUsage, deduplicate, estimate_tokens, prefer_modified};
 use crate::guardrails::{redact_secrets, validate_prompt};
 use crate::llm::{LlmClient, Message};
 use crate::settings::{AgentSettings, LlmConfig};
@@ -110,6 +110,9 @@ fn retrieval_request(ask: &AskRequest, limit: usize, members: bool) -> SearchReq
     SearchRequest::new(retrieval_query(&ask.prompt, &ask.history)).limit(limit).scope(scope)
 }
 
+/// The files with uncommitted changes, kept current by the change tracker.
+pub type Dirty = std::sync::Arc<std::sync::RwLock<std::collections::BTreeSet<String>>>;
+
 /// Handles one `agent:ask` request, always ending with `done` or `error`.
 pub async fn handle(
     client: BrokClient,
@@ -117,8 +120,9 @@ pub async fn handle(
     settings: Arc<AgentSettings>,
     llm: Arc<LlmConfig>,
     members: bool,
+    dirty: Dirty,
 ) {
-    let outcome = answer(&client, &request, &settings, &llm, members).await;
+    let outcome = answer(&client, &request, &settings, &llm, members, &dirty).await;
     let sent = match outcome {
         Ok(done) => client.reply(&request, &done).await,
         Err(e) => {
@@ -137,6 +141,7 @@ async fn answer(
     settings: &AgentSettings,
     llm: &LlmConfig,
     members: bool,
+    dirty: &Dirty,
 ) -> anyhow::Result<AskDone> {
     let ask: AskRequest = request.decode().context("malformed agent:ask payload")?;
     validate_prompt(&ask.prompt)?;
@@ -169,6 +174,10 @@ async fn answer(
             }
         }
     };
+    if budget.adaptive && tuning.prefer_modified {
+        let dirty = dirty.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        hits = prefer_modified(hits, &dirty);
+    }
     if tuning.deduplicate {
         hits = deduplicate(hits);
     }
@@ -472,5 +481,116 @@ mod tests {
     fn user_message_mentions_missing_context() {
         assert!(user_message("why?", "").starts_with("No indexed workspace context"));
         assert!(user_message("why?", "ctx\n\n").contains("## Workspace context"));
+    }
+
+    /// Benchmark scenarios: the same ranked candidates, assembled with the legacy
+    /// character limits and with the token budget. Run with
+    /// `cargo test benchmark -- --nocapture` to see the table (docs/benchmarks.md).
+    mod benchmark {
+        use std::collections::BTreeSet;
+
+        use brok_sdk::prelude::SearchHit;
+
+        use crate::ask::assemble_limited;
+        use crate::context::{Limit, deduplicate, estimate_tokens, prefer_modified};
+
+        fn chunk(path: &str, start: u32, end: u32, score: f32, lines: usize) -> SearchHit {
+            let content = (start..start + lines as u32)
+                .map(|n| format!("    let value_{n} = compute(input_{n}, &config);"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            SearchHit {
+                chunk_id: format!("{path}#{start}"),
+                partition: "root".into(),
+                path: path.into(),
+                language: "rust".into(),
+                kind: "function".into(),
+                symbol: None,
+                signature: None,
+                start_line: start,
+                end_line: end,
+                score,
+                content,
+            }
+        }
+
+        struct Outcome {
+            relevant: usize,
+            sources: usize,
+            tokens: usize,
+        }
+
+        fn measure(hits: &[SearchHit], limit: Limit, relevant: &BTreeSet<&str>) -> Outcome {
+            let context = assemble_limited(hits, limit);
+            Outcome {
+                relevant: context
+                    .sources
+                    .iter()
+                    .filter(|s| relevant.contains(s.path.as_str()))
+                    .map(|s| s.path.as_str())
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+                sources: context.sources.len(),
+                tokens: estimate_tokens(&context.text),
+            }
+        }
+
+        /// Ranked candidates as a search returns them: the top hits are overlapping slices of one
+        /// big file, and what the question needs is further down the ranking.
+        fn candidates() -> Vec<SearchHit> {
+            let mut hits = vec![
+                chunk("src/big.rs", 1, 60, 1.00, 60),
+                chunk("src/big.rs", 30, 90, 0.98, 60),
+                chunk("src/big.rs", 50, 110, 0.96, 60),
+                chunk("src/big.rs", 1, 60, 0.95, 60),
+            ];
+            for (i, path) in ["src/auth.rs", "src/session.rs", "tests/auth.rs", "src/token.rs"].iter().enumerate() {
+                hits.push(chunk(path, 10, 30, 0.90 - i as f32 * 0.02, 20));
+            }
+            for n in 0..8 {
+                hits.push(chunk(&format!("src/noise{n}.rs"), 1, 40, 0.5 - n as f32 * 0.01, 40));
+            }
+            hits
+        }
+
+        #[test]
+        fn token_budget_keeps_the_relevant_context_in_fewer_tokens() {
+            let relevant: BTreeSet<&str> = ["src/auth.rs", "src/session.rs", "tests/auth.rs", "src/token.rs"].into();
+            let all = candidates();
+
+            // Legacy: the first 8 chunks, up to 24,000 characters.
+            let legacy_hits: Vec<_> = all.iter().take(8).cloned().collect();
+            let legacy = measure(&legacy_hits, Limit::Chars(24_000), &relevant);
+
+            // Token-aware: more candidates, overlaps dropped, a 3,000 token context.
+            let adaptive = measure(&deduplicate(all.clone()), Limit::Tokens(3_000), &relevant);
+
+            // The same small budget without and with work in progress in src/auth.rs.
+            let tight = measure(&deduplicate(all.clone()), Limit::Tokens(1_500), &relevant);
+            let dirty: BTreeSet<String> = ["src/auth.rs".to_owned()].into();
+            let favored = measure(&deduplicate(prefer_modified(all, &dirty)), Limit::Tokens(1_500), &relevant);
+
+            println!("{:<34} {:>9} {:>8} {:>8}", "scenario", "relevant", "sources", "tokens");
+            for (name, o) in [
+                ("legacy 8 chunks / 24k chars", &legacy),
+                ("tokens 3k + dedup", &adaptive),
+                ("tokens 1.5k + dedup", &tight),
+                ("tokens 1.5k + dedup + modified", &favored),
+            ] {
+                println!("{name:<34} {:>6}/4 {:>8} {:>8}", o.relevant, o.sources, o.tokens);
+            }
+
+            assert!(adaptive.tokens <= 3_000, "the budget is respected");
+            assert!(adaptive.tokens * 10 < legacy.tokens * 7, "at least 30% fewer tokens than the character limits");
+            assert!(adaptive.relevant >= legacy.relevant, "nothing relevant is lost");
+            assert!(favored.tokens <= 1_500 && favored.relevant >= tight.relevant);
+            let first = |hits: Vec<SearchHit>| deduplicate(hits).remove(0).path;
+            assert_eq!(first(candidates()), "src/big.rs");
+            assert_eq!(
+                first(prefer_modified(candidates(), &dirty)),
+                "src/auth.rs",
+                "the file being changed leads the context"
+            );
+        }
     }
 }

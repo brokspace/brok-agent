@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- `context.prefer_modified` (on by default, with adaptive retrieval): chunks of the files you are changing, and their tests, rank a little higher, so a question during development sees your work in progress first. The change tracker shares the list of dirty files with `ask`.
+- A context benchmark (`cargo test benchmark -- --nocapture`, `docs/benchmarks.md`) comparing the character limits with the token budget on relevance and estimated tokens (brokspace/brok-agent#23).
+
 ### Fixed
 
 - A file moved with `git mv` (or moved and committed) left its old path in the index: git's rename detection listed only the new name, so the old file was never reported as deleted. Change tracking now asks git for changes without rename detection (brokspace/brok-agent#22).

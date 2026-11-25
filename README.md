@@ -75,6 +75,7 @@ shards:
 | `context.max_history_tokens` | `1200` | Share of the budget for earlier turns; the newest win. |
 | `context.deduplicate` | `true` | Drop chunks overlapping a better ranked one (same file and lines, or same text). |
 | `context.adaptive_retrieval` | `true` | With a token budget, fetch twice the chunks and keep the best that fit. |
+| `context.prefer_modified` | `true` | With adaptive retrieval, rank chunks of the files you are changing (uncommitted) and their tests a little higher. A boost, not a jump: a clearly better hit elsewhere still wins. |
 | `system_prompt` | built in | Replaces the default system prompt. |
 | `review.enabled` | `false` | Turns the pre-indexation review on. |
 | `review.include` / `review.exclude` | `["src/api/**"]` / `["**/*.md"]` | Globs relative to the workspace root (`*` does not cross `/`). |
