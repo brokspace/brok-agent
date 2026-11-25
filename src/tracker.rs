@@ -137,7 +137,7 @@ impl Tracker {
             if let Ok(head) = git(&dir, &["rev-parse", "HEAD"]).await {
                 let head = head.trim().to_owned();
                 if let Some(old) = self.heads.get(&prefix).filter(|old| **old != head) {
-                    match git(&dir, &["diff", "--name-only", "--relative", "-z", old, &head]).await {
+                    match git(&dir, &["diff", "--name-only", "--no-renames", "--relative", "-z", old, &head]).await {
                         Ok(names) => committed.extend(
                             names
                                 .split('\0')
@@ -237,8 +237,10 @@ pub fn find_nested_repositories(root: &Path, max_depth: usize) -> Vec<String> {
 }
 
 /// Dirty files of one repository, as workspace relative paths.
+/// Git's rename detection is off (`--no-renames`): with it a moved file is listed only under its new
+/// name, and the old path would never be reported as deleted from the index.
 async fn dirty_paths(root: &Path, dir: &Path, prefix: &str) -> anyhow::Result<BTreeSet<String>> {
-    let tracked = match git(dir, &["diff", "--name-only", "--relative", "-z", "HEAD"]).await {
+    let tracked = match git(dir, &["diff", "--name-only", "--no-renames", "--relative", "-z", "HEAD"]).await {
         Ok(out) => out,
         // No commit yet: everything in the index is new.
         Err(_) => git(dir, &["ls-files", "-z", "--cached"]).await?,
@@ -486,5 +488,98 @@ mod tests {
 
         std::fs::write(root.join("web/main.rs"), "fn main() { println!(); }").unwrap();
         assert_eq!(tracker.poll().await.unwrap().changed, vec!["web/main.rs"]);
+    }
+
+    #[tokio::test]
+    async fn a_rename_is_a_deletion_and_a_new_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        std::fs::write(root.join("old.rs"), "fn a() {}").unwrap();
+        commit_all(root, "init");
+
+        let mut tracker = Tracker::new(root);
+        assert_eq!(tracker.poll().await.unwrap(), FileChanged::default());
+
+        // A plain `mv` and a staged `git mv` both reach the index as a deletion and a new file.
+        std::fs::rename(root.join("old.rs"), root.join("renamed.rs")).unwrap();
+        let change = tracker.poll().await.unwrap();
+        assert_eq!(change.changed, vec!["renamed.rs"]);
+        assert_eq!(change.deleted, vec!["old.rs"]);
+
+        commit_all(root, "rename");
+        // Committing is a new HEAD: the same files are named again (re-indexing them is idempotent), and no others.
+        let committed = tracker.poll().await.unwrap();
+        assert_eq!(committed.changed, vec!["renamed.rs"]);
+        assert_eq!(committed.deleted, vec!["old.rs"]);
+        git_in(root, &["mv", "renamed.rs", "moved.rs"]);
+        let change = tracker.poll().await.unwrap();
+        assert_eq!(change.changed, vec!["moved.rs"]);
+        assert_eq!(change.deleted, vec!["renamed.rs"]);
+        assert_eq!(tracker.poll().await.unwrap(), FileChanged::default());
+    }
+
+    #[tokio::test]
+    async fn deleting_and_restoring_a_file_is_reported_each_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        std::fs::write(root.join("kept.rs"), "fn a() {}").unwrap();
+        commit_all(root, "init");
+
+        let mut tracker = Tracker::new(root);
+        assert_eq!(tracker.poll().await.unwrap(), FileChanged::default());
+
+        std::fs::remove_file(root.join("kept.rs")).unwrap();
+        assert_eq!(tracker.poll().await.unwrap().deleted, vec!["kept.rs"]);
+        git_in(root, &["checkout", "--", "kept.rs"]);
+        assert_eq!(tracker.poll().await.unwrap().changed, vec!["kept.rs"]);
+        assert_eq!(tracker.poll().await.unwrap(), FileChanged::default());
+    }
+
+    #[tokio::test]
+    async fn rapid_changes_between_polls_are_coalesced() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        std::fs::write(root.join("a.rs"), "fn a() {}").unwrap();
+        commit_all(root, "init");
+
+        let mut tracker = Tracker::new(root);
+        assert_eq!(tracker.poll().await.unwrap(), FileChanged::default());
+
+        // Many edits to one file, a file created and removed again, and a file that stays.
+        for n in 0..20 {
+            std::fs::write(root.join("a.rs"), format!("fn a() {{ {n} }}")).unwrap();
+        }
+        std::fs::write(root.join("temp.rs"), "x").unwrap();
+        std::fs::remove_file(root.join("temp.rs")).unwrap();
+        std::fs::write(root.join("b.rs"), "fn b() {}").unwrap();
+
+        let change = tracker.poll().await.unwrap();
+        assert_eq!(change.changed, vec!["a.rs", "b.rs"], "one entry per file, nothing for the file that came and went");
+        assert!(change.deleted.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_restart_does_not_replay_history_but_sees_later_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        std::fs::write(root.join("a.rs"), "fn a() {}").unwrap();
+        commit_all(root, "init");
+
+        let mut first = Tracker::new(root);
+        assert_eq!(first.poll().await.unwrap(), FileChanged::default());
+        std::fs::write(root.join("a.rs"), "fn a() { 1 }").unwrap();
+        commit_all(root, "while the agent was down");
+        drop(first);
+
+        // A new agent process starts from the current state: the earlier commit is not replayed,
+        // and a change made after it starts is reported.
+        let mut second = Tracker::new(root);
+        assert_eq!(second.poll().await.unwrap(), FileChanged::default());
+        std::fs::write(root.join("b.rs"), "fn b() {}").unwrap();
+        assert_eq!(second.poll().await.unwrap().changed, vec!["b.rs"]);
     }
 }
