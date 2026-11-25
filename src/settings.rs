@@ -45,6 +45,9 @@ pub struct AgentSettings {
     pub reconcile_interval_secs: u64,
     /// Chunks retrieved for each question.
     pub context_chunks: usize,
+    /// In a Meta Workspace, also retrieve context from the member
+    /// repositories (their hits are cited as `member:path`).
+    pub search_members: bool,
     /// Upper bound of context characters sent to the model.
     pub max_context_chars: usize,
     /// Token budget of the prompt (see [`ContextSettings`]).
@@ -63,6 +66,7 @@ impl Default for AgentSettings {
             debounce_ms: 300,
             reconcile_interval_secs: 300,
             context_chunks: 8,
+            search_members: true,
             max_context_chars: 24_000,
             context: ContextSettings::default(),
             review: ReviewSettings::default(),
@@ -215,6 +219,7 @@ mod tests {
         assert!(s.review.enabled);
         assert_eq!(s.review.include, vec!["src/api/**"]);
         assert_eq!(s.context_chunks, 8);
+        assert!(s.search_members);
     }
 
     #[test]

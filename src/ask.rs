@@ -103,9 +103,22 @@ fn fence_language(language: &str) -> &str {
     }
 }
 
+/// The index search that gathers context for `ask`: this workspace, and its
+/// Meta Workspace members when there are some to look at.
+fn retrieval_request(ask: &AskRequest, limit: usize, members: bool) -> SearchRequest {
+    let scope = if members { SearchScope::Workspace } else { SearchScope::Repository };
+    SearchRequest::new(retrieval_query(&ask.prompt, &ask.history)).limit(limit).scope(scope)
+}
+
 /// Handles one `agent:ask` request, always ending with `done` or `error`.
-pub async fn handle(client: BrokClient, request: Event, settings: Arc<AgentSettings>, llm: Arc<LlmConfig>) {
-    let outcome = answer(&client, &request, &settings, &llm).await;
+pub async fn handle(
+    client: BrokClient,
+    request: Event,
+    settings: Arc<AgentSettings>,
+    llm: Arc<LlmConfig>,
+    members: bool,
+) {
+    let outcome = answer(&client, &request, &settings, &llm, members).await;
     let sent = match outcome {
         Ok(done) => client.reply(&request, &done).await,
         Err(e) => {
@@ -123,6 +136,7 @@ async fn answer(
     request: &Event,
     settings: &AgentSettings,
     llm: &LlmConfig,
+    members: bool,
 ) -> anyhow::Result<AskDone> {
     let ask: AskRequest = request.decode().context("malformed agent:ask payload")?;
     validate_prompt(&ask.prompt)?;
@@ -146,8 +160,7 @@ async fn answer(
     let mut hits = if candidates == 0 {
         Vec::new()
     } else {
-        let search =
-            SearchRequest { query: retrieval_query(&ask.prompt, &ask.history), limit: candidates, focus: None };
+        let search = retrieval_request(&ask, candidates, members);
         match client.call::<SearchRequest, SearchResults>(&search, SEARCH_TIMEOUT).await {
             Ok(results) => results.hits,
             Err(e) => {
@@ -299,6 +312,14 @@ mod tests {
 
     fn turn(role: ChatRole, content: &str) -> ChatTurn {
         ChatTurn { role, content: content.into() }
+    }
+
+    #[test]
+    fn retrieval_widens_to_the_members_only_when_there_are_some() {
+        let ask: AskRequest = serde_json::from_str(r#"{"prompt":"where is the invoice total computed?"}"#).unwrap();
+        assert_eq!(retrieval_request(&ask, 8, false).scope, SearchScope::Repository);
+        let wide = retrieval_request(&ask, 16, true);
+        assert_eq!((wide.scope, wide.limit), (SearchScope::Workspace, 16));
     }
 
     #[test]
