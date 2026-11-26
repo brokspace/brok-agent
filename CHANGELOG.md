@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- `shard.json` declares the brok versions the agent works with (0.8.0 up to 1.0.0), so brok can refuse a combination that does not (brokspace/brok#46).
+
 ### Fixed
 
 - When the model cannot be used (server not running, missing or refused API key, model not installed) the answer says what happened and what to do next, instead of a chain of transport errors. A key variable the agent is not allowed to read is explained too (brokspace/brok#197).
