@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-26
+
 ### Changed
 
 - `shard.json` declares the brok versions the agent works with (0.8.0 up to 1.0.0), so brok can refuse a combination that does not (brokspace/brok#46).
