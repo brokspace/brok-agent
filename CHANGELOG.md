@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
 ### Added
 
 - `context.prefer_modified` (on by default, with adaptive retrieval): chunks of the files you are changing, and their tests, rank a little higher, so a question during development sees your work in progress first. The change tracker shares the list of dirty files with `ask`.
