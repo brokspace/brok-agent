@@ -11,6 +11,7 @@ src/
   main.rs        connect to the bus, dispatch events, `--manifest` prints the embedded shard.json
   settings.rs    shard settings (shards.brok-agent.settings in brok.yml) and LLM routing
   tracker.rs     git based change tracking (root repo and submodules) -> file:changed
+  queue.rs       admission of agent:ask: how many run and wait
   watch.rs       file system events (notify): decides when the tracker scans; polling is the fallback
   review.rs      pre-indexation review -> review:result
   ask.rs         RAG answers: search via the index service, context assembly, streaming replies

@@ -127,6 +127,9 @@ shards:
 
 Payload types are defined in [`brok-sdk`](https://github.com/brokspace/brok-sdk).
 
+Four questions are answered at once and 28 more wait their turn. Beyond that the requester gets
+`agent:ask.error` saying the agent is busy, so a burst cannot start unbounded searches and model calls.
+
 ## Guardrails
 
 - Prompts must be non-empty and at most 16 000 characters.

@@ -135,6 +135,14 @@ pub async fn handle(
     }
 }
 
+/// Tells the requester the agent cannot take the question now.
+pub async fn refuse_busy(client: BrokClient, request: Event) {
+    let message = "brok-agent is busy answering other questions; try again in a moment".to_owned();
+    if let Err(e) = client.reply(&request, &AskFailed { message }).await {
+        tracing::warn!(error = %e, "cannot deliver the busy reply");
+    }
+}
+
 async fn answer(
     client: &BrokClient,
     request: &Event,

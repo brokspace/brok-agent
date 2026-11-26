@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- At most 4 questions are answered at once and 28 more wait their turn; beyond that the requester is told the agent is busy, instead of every request starting a search and a model call (brokspace/brok-agent#50).
+
 ## [0.5.0] - 2026-11-26
 
 ### Added
