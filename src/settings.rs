@@ -95,6 +95,10 @@ pub struct ContextSettings {
     /// With a token budget, retrieve extra candidates and keep the best that
     /// fit, instead of the first `context_chunks`.
     pub adaptive_retrieval: bool,
+    /// With adaptive retrieval, rank chunks of the files you are changing (and
+    /// their tests) a little higher, so a question during development sees
+    /// your work in progress first.
+    pub prefer_modified: bool,
 }
 
 impl Default for ContextSettings {
@@ -105,6 +109,7 @@ impl Default for ContextSettings {
             max_history_tokens: 1200,
             deduplicate: true,
             adaptive_retrieval: true,
+            prefer_modified: true,
         }
     }
 }
