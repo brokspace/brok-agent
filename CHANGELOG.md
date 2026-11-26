@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-26
+
 ### Added
 
 - A history benchmark (`cargo test history_benchmark -- --nocapture`, `docs/benchmarks.md`) showing which earlier decisions truncation still sends to the model (brokspace/brok-agent#24).
