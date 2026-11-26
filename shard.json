@@ -48,24 +48,24 @@
   },
   "releases": {
     "linux-aarch64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.1/brok-agent-linux-aarch64",
-      "sha256": "ef5ea044ca0b30e8c5d9b33f5afb2ae616d059e77c656165993583ffa2c035e4"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.2/brok-agent-linux-aarch64",
+      "sha256": "1755e4b210f7da92cc37f697f4b71616ceab1776dbd1947250100b3908993aae"
     },
     "linux-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.1/brok-agent-linux-x86_64",
-      "sha256": "cfeadde1d66425eca315e486c8a520dba3909cab765e42dfe80aac562c8f11fb"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.2/brok-agent-linux-x86_64",
+      "sha256": "7250d6c31abb2386533796470a6519e6a2e19c9ef20e992b5ee68f57a0397c41"
     },
     "macos-aarch64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.1/brok-agent-macos-aarch64",
-      "sha256": "1edf1b6e8854855df19033d73c100f3de668bcf1367e8ee670e3a715e8151b4a"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.2/brok-agent-macos-aarch64",
+      "sha256": "39b7151d1bff9e0a22c741add310e9fad6dc01d093185881b605c286c940dd2a"
     },
     "macos-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.1/brok-agent-macos-x86_64",
-      "sha256": "adfa7b6140ae2106b90e25195f3bdd7ac774dd284e504f0258d6093f1050fb7f"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.2/brok-agent-macos-x86_64",
+      "sha256": "4a3dc902049bfccc5f78681637b77869e9c2a6b11e560ab0803e31c7feea5bb5"
     },
     "windows-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.1/brok-agent-windows-x86_64.exe",
-      "sha256": "9af05010045b59b0b65c4f0a7ce822de7c8bc73e890ddf1a585245c6492fcf2a"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.2/brok-agent-windows-x86_64.exe",
+      "sha256": "1025b1452792c3497815e97a48c06f510c647daaca5a21e08cd27fea43a7e27e"
     }
   }
 }
