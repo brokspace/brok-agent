@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 
 use crate::context::{Limit, MESSAGE_OVERHEAD_TOKENS, TokenUsage, deduplicate, estimate_tokens, prefer_modified};
 use crate::guardrails::{redact_secrets, validate_prompt};
-use crate::llm::{LlmClient, Message};
+use crate::llm::{LlmClient, Message, explain};
 use crate::settings::{AgentSettings, LlmConfig};
 
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -159,7 +159,8 @@ async fn answer(
     if tuning.max_input_tokens.is_some() && provider.max_tokens.is_none() {
         provider.max_tokens = tuning.reserved_output_tokens;
     }
-    let model = LlmClient::new(&provider)?;
+    let explained = |e| anyhow::anyhow!(explain(&e, provider_name, &provider));
+    let model = LlmClient::new(&provider).map_err(explained)?;
 
     let base = settings.system_prompt.as_deref().unwrap_or(DEFAULT_SYSTEM_PROMPT);
     let system = system_prompt(base, ask.skill.as_ref());
@@ -209,7 +210,7 @@ async fn answer(
     let mut messages = vec![Message::system(&system)];
     messages.extend(history);
     messages.push(Message::user(user_message(&ask.prompt, &context.text)));
-    let mut deltas = pin!(model.stream(&messages).await?);
+    let mut deltas = pin!(model.stream(&messages).await.map_err(explained)?);
     while let Some(delta) = deltas.next().await {
         client.reply(request, &AskChunk { text: delta? }).await?;
     }
