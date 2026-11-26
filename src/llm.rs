@@ -45,8 +45,12 @@ pub fn explain(error: &LlmError, name: &str, provider: &LlmProvider) -> String {
     let url = without_credentials(&provider.base_url);
     let choose = "choose another model with `brok setup llm`";
     match error {
-        LlmError::MissingApiKey(variable) => format!(
+        LlmError::MissingApiKey(variable) if readable_variable(variable) => format!(
             "the provider `{name}` needs an API key in {variable}, which is not set. Export it, then run `brok restart`"
+        ),
+        LlmError::MissingApiKey(variable) => format!(
+            "brok-agent may not read {variable}, the key variable of the provider `{name}`: it only gets variables \
+             ending in `_API_KEY` or starting with `OPENAI_`. Rename it in brok.yml and your shell, then run `brok restart`"
         ),
         LlmError::Http(e) if e.is_connect() || e.is_timeout() => {
             format!("cannot reach the model `{name}` at {url}. Start its server, or {choose}")
@@ -64,6 +68,13 @@ pub fn explain(error: &LlmError, name: &str, provider: &LlmProvider) -> String {
         ),
         other => format!("the model `{name}` failed: {other}"),
     }
+}
+
+/// Whether `permissions.env` in shard.json lets the agent see this variable;
+/// the runtime removes every other one.
+fn readable_variable(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    name.ends_with("_API_KEY") || name.starts_with("OPENAI_")
 }
 
 /// `url` without a `user:password@` part.
@@ -328,17 +339,27 @@ mod tests {
     #[test]
     fn failures_say_what_to_do_next() {
         use super::{LlmError, explain};
-        let hosted = provider("https://user:s3cret@api.example.com/v1", Some("EXAMPLE_KEY"));
+        let hosted = provider("https://user:s3cret@api.example.com/v1", Some("EXAMPLE_API_KEY"));
         let status = |status| LlmError::Status { status, body: "key sk-leaked".into() };
         let refused = explain(&status(401), "example", &hosted);
-        assert!(refused.contains("EXAMPLE_KEY") && refused.contains("brok restart"), "{refused}");
+        assert!(refused.contains("EXAMPLE_API_KEY") && refused.contains("brok restart"), "{refused}");
         assert!(!refused.contains("sk-leaked") && !refused.contains("s3cret"), "{refused}");
         let missing = explain(&status(404), "example", &hosted);
         assert!(missing.contains("`coder:7b` at https://api.example.com/v1"), "{missing}");
         assert!(!missing.contains("s3cret"), "{missing}");
-        let unset = explain(&LlmError::MissingApiKey("EXAMPLE_KEY".into()), "example", &hosted);
-        assert!(unset.contains("EXAMPLE_KEY, which is not set"), "{unset}");
+        let unset = explain(&LlmError::MissingApiKey("EXAMPLE_API_KEY".into()), "example", &hosted);
+        assert!(unset.contains("EXAMPLE_API_KEY, which is not set"), "{unset}");
         assert!(explain(&status(500), "example", &hosted).contains("HTTP 500"));
+        let hidden = explain(&LlmError::MissingApiKey("MY_TOKEN".into()), "example", &hosted);
+        assert!(hidden.contains("may not read MY_TOKEN") && hidden.contains("_API_KEY"), "{hidden}");
+    }
+
+    #[test]
+    fn the_stated_variable_rule_matches_the_manifest() {
+        let manifest: serde_json::Value = serde_json::from_str(include_str!("../shard.json")).unwrap();
+        let allowed: Vec<&str> =
+            manifest["permissions"]["env"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        assert!(allowed.contains(&"*_API_KEY") && allowed.contains(&"OPENAI_*"), "{allowed:?}");
     }
 
     #[tokio::test]
