@@ -72,7 +72,7 @@ shards:
 | `max_context_chars` | `24000` | Context budget sent to the model, in characters. Used when `context.max_input_tokens` is unset. |
 | `context.max_input_tokens` | unset | Estimated tokens the whole prompt may use. Turns on token budgeting (below). |
 | `context.reserved_output_tokens` | unset | Sent as `max_tokens` when the provider sets none (token budgeting only). |
-| `context.max_history_tokens` | `1200` | Share of the budget for earlier turns; the newest win. |
+| `context.max_history_tokens` | `1200` | Share of the budget for earlier turns: recent questions are kept first, long answers are shortened. |
 | `context.deduplicate` | `true` | Drop chunks overlapping a better ranked one (same file and lines, or same text). |
 | `context.adaptive_retrieval` | `true` | With a token budget, fetch twice the chunks and keep the best that fit. |
 | `context.prefer_modified` | `true` | With adaptive retrieval, rank chunks of the files you are changing (uncommitted) and their tests a little higher. A boost, not a jump: a clearly better hit elsewhere still wins. |

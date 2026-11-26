@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+
+- A long last answer no longer removes the conversation history from the next question. Earlier questions, where decisions usually are, are kept before long answers; a long answer is shortened or replaced by a note, within the same limits (brokspace/brok-agent#59).
+
 ## [0.5.1] - 2026-11-26
 
 ### Added
