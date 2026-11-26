@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- A history benchmark (`cargo test history_benchmark -- --nocapture`, `docs/benchmarks.md`) showing which earlier decisions truncation still sends to the model (brokspace/brok-agent#24).
+
 ### Changed
 
 - At most 4 questions are answered at once and 28 more wait their turn; beyond that the requester is told the agent is busy, instead of every request starting a search and a model call (brokspace/brok-agent#50).

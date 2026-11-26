@@ -601,4 +601,68 @@ mod tests {
             );
         }
     }
+
+    /// What truncating the history loses (brokspace/brok-agent#24). A synthetic
+    /// conversation states a decision in some questions; each row counts the
+    /// decisions still sent to the model. `cargo test history_benchmark --
+    /// --nocapture` prints the table (docs/benchmarks.md).
+    mod history_benchmark {
+        use brok_sdk::prelude::{ChatRole, ChatTurn};
+
+        use super::turn;
+        use crate::ask::{MAX_HISTORY_CHARS, estimate_message, history_messages};
+        use crate::context::Limit;
+
+        /// Exchanges (of `EXCHANGES`) in which the user states a decision.
+        const DECISIONS: [usize; 5] = [1, 5, 10, 15, 19];
+        const EXCHANGES: usize = 20;
+        /// Turns `brok chat` keeps and sends.
+        const CLIENT_TURNS: usize = 12;
+
+        fn conversation(answer_chars: usize) -> Vec<ChatTurn> {
+            (1..=EXCHANGES)
+                .flat_map(|n| {
+                    let question = if DECISIONS.contains(&n) {
+                        format!("Decision {n}: we keep the retry limit at {n}. Apply that to the client.")
+                    } else {
+                        format!("Question {n}: where is this handled and how would you change it?")
+                    };
+                    [turn(ChatRole::User, &question), turn(ChatRole::Assistant, &"a".repeat(answer_chars))]
+                })
+                .collect()
+        }
+
+        /// Messages kept, decisions among them and their estimated tokens.
+        fn measure(history: &[ChatTurn], limit: Limit) -> (usize, usize, usize) {
+            let sent = &history[history.len().saturating_sub(CLIENT_TURNS)..];
+            let kept = history_messages(sent, limit);
+            let decisions = DECISIONS
+                .iter()
+                .filter(|n| kept.iter().any(|m| m.content.starts_with(&format!("Decision {n}:"))))
+                .count();
+            (kept.len(), decisions, kept.iter().map(|m| estimate_message(&m.content)).sum())
+        }
+
+        #[test]
+        fn history_truncation_keeps_few_early_decisions() {
+            let limits = [
+                ("character limit (default)", Limit::Chars(MAX_HISTORY_CHARS)),
+                ("token budget, history 1200", Limit::Tokens(1_200)),
+                ("token budget, history 4000", Limit::Tokens(4_000)),
+            ];
+            println!("{:<28} {:>7} {:>9} {:>10} {:>8}", "limit", "answer", "messages", "decisions", "tokens");
+            let mut results = Vec::new();
+            for answer in [600, 2_400, 6_000] {
+                for (name, limit) in limits {
+                    let (messages, decisions, tokens) = measure(&conversation(answer), limit);
+                    println!("{name:<28} {answer:>7} {messages:>9} {decisions:>8}/5 {tokens:>8}");
+                    results.push((answer, limit, messages, decisions));
+                }
+            }
+            // The client's turn cap alone hides every decision before exchange 15.
+            assert!(results.iter().all(|r| r.3 <= 2));
+            // One answer over the budget leaves the model with no history at all.
+            assert!(results.contains(&(6_000, Limit::Tokens(1_200), 0, 0)));
+        }
+    }
 }
