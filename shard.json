@@ -1,12 +1,13 @@
 {
   "name": "brok-agent",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Default Brokspace system shard: git change tracking, pre-indexation review and RAG answers",
   "authors": [
     "Brokspace contributors"
   ],
   "license": "MIT OR Apache-2.0",
   "repository": "https://github.com/brokspace/brok-agent",
+  "brok": ">=0.8.0, <1.0.0",
   "entrypoint": "bin/brok-agent",
   "runtime": "native",
   "permissions": {
@@ -47,24 +48,24 @@
   },
   "releases": {
     "linux-aarch64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.0/brok-agent-linux-aarch64",
-      "sha256": "d701ec2812d62bc736505459adbe6b722a2a96199dd5da45467b201085fcf015"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.1/brok-agent-linux-aarch64",
+      "sha256": "ef5ea044ca0b30e8c5d9b33f5afb2ae616d059e77c656165993583ffa2c035e4"
     },
     "linux-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.0/brok-agent-linux-x86_64",
-      "sha256": "3e226ddd3d3b2b996542b7092206ab16b29c37f0903c91fff9ecd949c9b0705e"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.1/brok-agent-linux-x86_64",
+      "sha256": "cfeadde1d66425eca315e486c8a520dba3909cab765e42dfe80aac562c8f11fb"
     },
     "macos-aarch64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.0/brok-agent-macos-aarch64",
-      "sha256": "7c1225a9ccec40912c08034a9d59d4c04660f1f459d736acbd00a78b1e86d3fa"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.1/brok-agent-macos-aarch64",
+      "sha256": "1edf1b6e8854855df19033d73c100f3de668bcf1367e8ee670e3a715e8151b4a"
     },
     "macos-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.0/brok-agent-macos-x86_64",
-      "sha256": "8221b4cdce2df5d3ca7e359ab0f9d53f1c7468b91c9ba886920211d01d289d4b"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.1/brok-agent-macos-x86_64",
+      "sha256": "adfa7b6140ae2106b90e25195f3bdd7ac774dd284e504f0258d6093f1050fb7f"
     },
     "windows-x86_64": {
-      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.0/brok-agent-windows-x86_64.exe",
-      "sha256": "ef2a4b3846a6fee42eab6fa7bca971b6d0834511455cebc9b42a6ab7d54f7af3"
+      "url": "https://github.com/brokspace/brok-agent/releases/download/v0.5.1/brok-agent-windows-x86_64.exe",
+      "sha256": "9af05010045b59b0b65c4f0a7ce822de7c8bc73e890ddf1a585245c6492fcf2a"
     }
   }
 }

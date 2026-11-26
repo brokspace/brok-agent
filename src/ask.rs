@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 
 use crate::context::{Limit, MESSAGE_OVERHEAD_TOKENS, TokenUsage, deduplicate, estimate_tokens, prefer_modified};
 use crate::guardrails::{redact_secrets, validate_prompt};
-use crate::llm::{LlmClient, Message};
+use crate::llm::{LlmClient, Message, explain};
 use crate::settings::{AgentSettings, LlmConfig};
 
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -159,7 +159,8 @@ async fn answer(
     if tuning.max_input_tokens.is_some() && provider.max_tokens.is_none() {
         provider.max_tokens = tuning.reserved_output_tokens;
     }
-    let model = LlmClient::new(&provider)?;
+    let explained = |e| anyhow::anyhow!(explain(&e, provider_name, &provider));
+    let model = LlmClient::new(&provider).map_err(explained)?;
 
     let base = settings.system_prompt.as_deref().unwrap_or(DEFAULT_SYSTEM_PROMPT);
     let system = system_prompt(base, ask.skill.as_ref());
@@ -209,7 +210,7 @@ async fn answer(
     let mut messages = vec![Message::system(&system)];
     messages.extend(history);
     messages.push(Message::user(user_message(&ask.prompt, &context.text)));
-    let mut deltas = pin!(model.stream(&messages).await?);
+    let mut deltas = pin!(model.stream(&messages).await.map_err(explained)?);
     while let Some(delta) = deltas.next().await {
         client.reply(request, &AskChunk { text: delta? }).await?;
     }
@@ -278,23 +279,102 @@ fn estimate_message(text: &str) -> usize {
     estimate_tokens(text) + MESSAGE_OVERHEAD_TOKENS
 }
 
-/// The conversation so far as chat messages, oldest first, keeping only the
-/// newest turns that fit the turn count and `limit`.
+/// Ends a message that was cut to fit the history limit.
+const SHORTENED: &str = "\n[shortened]";
+/// Stands in for an earlier answer that does not fit.
+const OMITTED: &str = "[earlier answer omitted]";
+
+/// The conversation so far as chat messages, oldest first, within the turn
+/// count and `limit`.
+///
+/// What users decide is mostly in their short questions, and long answers
+/// should not push it out. In order: the newest question, then earlier
+/// questions, then the newest answer (shortened if needed, never below half
+/// the limit for lack of earlier questions), then earlier answers that still
+/// fit. Roles keep alternating: an answer left out is replaced by a note, and
+/// an answer is never sent without its question.
 fn history_messages(history: &[ChatTurn], limit: Limit) -> Vec<Message> {
-    let mut kept = Vec::new();
-    let mut used = 0;
-    for turn in history.iter().rev().take(MAX_HISTORY_TURNS) {
-        used += limit.cost(&turn.content);
-        if used > limit.amount() {
-            break;
+    let mut exchanges: Vec<(&str, Option<String>)> = Vec::new();
+    for turn in &history[history.len().saturating_sub(MAX_HISTORY_TURNS)..] {
+        match (turn.role, exchanges.last_mut()) {
+            (ChatRole::User, _) => exchanges.push((&turn.content, None)),
+            (ChatRole::Assistant, Some((_, Some(answer)))) => {
+                answer.push_str("\n\n");
+                answer.push_str(&turn.content);
+            }
+            (ChatRole::Assistant, Some((_, answer))) => *answer = Some(turn.content.clone()),
+            (ChatRole::Assistant, None) => {} // its question is no longer here
         }
-        kept.push(match turn.role {
-            ChatRole::User => Message::user(&turn.content),
-            ChatRole::Assistant => Message::assistant(&turn.content),
-        });
     }
-    kept.reverse();
-    kept
+    let Some(((question, answer), earlier)) = exchanges.split_last() else { return Vec::new() };
+
+    let max = limit.amount();
+    let reserved = answer.as_deref().map_or(0, |a| limit.cost(a).min(max / 2));
+    let Some(question) = shorten(question, limit, max - reserved) else { return Vec::new() };
+    let mut used = limit.cost(&question) + reserved;
+
+    // Earlier questions, newest first, each with at least a note as answer.
+    let mut kept: Vec<Option<(&str, Option<&str>)>> = vec![None; earlier.len()];
+    for (slot, (question, answer)) in kept.iter_mut().zip(earlier).rev() {
+        let note = answer.as_deref().map(|a| if limit.cost(a) <= limit.cost(OMITTED) { a } else { OMITTED });
+        let cost = limit.cost(question) + note.map_or(0, |n| limit.cost(n));
+        if used + cost <= max {
+            used += cost;
+            *slot = Some((question, note));
+        }
+    }
+
+    let answer = match answer {
+        Some(answer) => {
+            let Some(answer) = shorten(answer, limit, max - (used - reserved)) else { return Vec::new() };
+            used = used - reserved + limit.cost(&answer);
+            Some(answer)
+        }
+        None => None,
+    };
+
+    // Earlier answers in full where they still fit.
+    for (slot, (_, full)) in kept.iter_mut().zip(earlier).rev() {
+        let (Some((_, Some(note))), Some(full)) = (slot, full.as_deref()) else { continue };
+        let extra = limit.cost(full).saturating_sub(limit.cost(note));
+        if used + extra <= max {
+            used += extra;
+            *note = full;
+        }
+    }
+
+    let mut messages = Vec::new();
+    for (question, answer) in kept.into_iter().flatten() {
+        messages.push(Message::user(question));
+        messages.extend(answer.map(Message::assistant));
+    }
+    messages.push(Message::user(&question));
+    messages.extend(answer.as_deref().map(Message::assistant));
+    messages
+}
+
+/// `text` if it costs at most `room`, else its longest beginning that does
+/// together with the [`SHORTENED`] note. `None` when not even that fits.
+fn shorten(text: &str, limit: Limit, room: usize) -> Option<String> {
+    if room == 0 {
+        return None;
+    }
+    if limit.cost(text) <= room {
+        return Some(text.to_owned());
+    }
+    let ends: Vec<usize> = text.char_indices().map(|(i, c)| i + c.len_utf8()).collect();
+    let cut = |chars: usize| format!("{}{SHORTENED}", &text[..ends[chars - 1]]);
+    // The cost grows with the length: find the longest beginning that fits.
+    let (mut fits, mut too_long) = (0, ends.len() + 1);
+    while too_long - fits > 1 {
+        let middle = usize::midpoint(fits, too_long);
+        if limit.cost(&cut(middle)) <= room {
+            fits = middle;
+        } else {
+            too_long = middle;
+        }
+    }
+    (fits > 0).then(|| cut(fits))
 }
 
 /// What to search the index for. A short follow-up ("and where is it
@@ -355,9 +435,79 @@ mod tests {
     fn history_respects_the_character_budget() {
         let big = "x".repeat(MAX_HISTORY_CHARS - 10);
         let history = vec![turn(ChatRole::User, &big), turn(ChatRole::Assistant, "short answer")];
-        let messages = history_messages(&history, Limit::Chars(MAX_HISTORY_CHARS));
-        assert_eq!(messages, vec![Message::assistant("short answer")]);
+        // A huge question is cut to leave room for its short answer.
+        let messages = history_messages(&history, Limit::Chars(1_000));
+        assert_eq!(messages.len(), 2);
+        assert!(messages[0].content.ends_with(SHORTENED));
+        assert_eq!(messages[1], Message::assistant("short answer"));
+        assert_eq!(messages.iter().map(|m| m.content.chars().count()).sum::<usize>(), 1_000);
         assert!(history_messages(&[], Limit::Chars(1)).is_empty());
+        assert!(history_messages(&history, Limit::Chars(0)).is_empty(), "history turned off");
+    }
+
+    #[test]
+    fn a_long_last_answer_is_shortened_instead_of_dropping_the_history() {
+        let history = vec![
+            turn(ChatRole::User, "we keep the retry limit at 3"),
+            turn(ChatRole::Assistant, &"b".repeat(2_000)),
+            turn(ChatRole::User, "show the client"),
+            turn(ChatRole::Assistant, &"a".repeat(9_000)),
+        ];
+        let messages = history_messages(&history, Limit::Tokens(1_200));
+        assert_eq!(messages[0], Message::user("we keep the retry limit at 3"));
+        assert_eq!(messages[1], Message::assistant(OMITTED));
+        assert_eq!(messages[2], Message::user("show the client"));
+        assert!(messages[3].content.starts_with("aaa") && messages[3].content.ends_with(SHORTENED));
+        assert!(estimate_tokens(&messages[3].content) > 1_100, "the newest answer gets the room left");
+    }
+
+    #[test]
+    fn earlier_answers_return_when_there_is_room_for_them() {
+        let history = vec![
+            turn(ChatRole::User, "one"),
+            turn(ChatRole::Assistant, &"x".repeat(500)),
+            turn(ChatRole::User, "two"),
+            turn(ChatRole::Assistant, &"y".repeat(100)),
+        ];
+        let all = history_messages(&history, Limit::Chars(606));
+        assert_eq!(all.len(), 4);
+        assert_eq!(all[1].content.len(), 500);
+        let less = history_messages(&history, Limit::Chars(605));
+        assert_eq!(less[1], Message::assistant(OMITTED));
+        assert_eq!(less[3].content.len(), 100);
+    }
+
+    /// Whatever the sizes and the limit: within it, alternating, in order,
+    /// starting with a question.
+    #[test]
+    fn history_stays_within_its_limit_and_well_formed() {
+        for size in [0, 1, 20, 300, 5_000] {
+            let history: Vec<ChatTurn> = (0..15)
+                .flat_map(|n| {
+                    [
+                        turn(ChatRole::User, &format!("{n} é {}", "q".repeat(size / 7))),
+                        turn(ChatRole::Assistant, &"ã".repeat(size + n)),
+                    ]
+                })
+                // A window that starts in the middle of an exchange.
+                .skip(1)
+                .collect();
+            for amount in [0, 1, 5, 12, 13, 25, 40, 150, 1_200, 12_000, 1_000_000] {
+                for limit in [Limit::Chars(amount), Limit::Tokens(amount)] {
+                    let messages = history_messages(&history, limit);
+                    let used: usize = messages.iter().map(|m| limit.cost(&m.content)).sum();
+                    assert!(used <= amount, "{size} {limit:?}: {used}");
+                    assert!(messages.len() <= MAX_HISTORY_TURNS);
+                    for (i, message) in messages.iter().enumerate() {
+                        let expected = if i % 2 == 0 { Message::user("") } else { Message::assistant("") };
+                        assert_eq!(message.role, expected.role, "{size} {limit:?} at {i}");
+                    }
+                    let numbers: Vec<u32> =
+                        messages.iter().step_by(2).filter_map(|m| m.content.split(' ').next()?.parse().ok()).collect();
+                    assert!(numbers.windows(2).all(|w| w[0] < w[1]), "{numbers:?}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -464,7 +614,8 @@ mod tests {
         let mut tight = token_settings(2000);
         tight.context.max_history_tokens = 150;
         let kept = history_messages(&request.history, Limit::Tokens(150));
-        assert_eq!(kept.len(), 1, "only the newest turn fits");
+        assert_eq!(kept.len(), 2, "the exchange is shortened, not split");
+        assert!(kept.iter().map(|m| estimate_tokens(&m.content)).sum::<usize>() <= 150);
         assert_eq!(Budget::plan(&tight, "sys", &request).history, Limit::Tokens(150));
     }
 
@@ -659,10 +810,9 @@ mod tests {
                     results.push((answer, limit, messages, decisions));
                 }
             }
-            // The client's turn cap alone hides every decision before exchange 15.
-            assert!(results.iter().all(|r| r.3 <= 2));
-            // One answer over the budget leaves the model with no history at all.
-            assert!(results.contains(&(6_000, Limit::Tokens(1_200), 0, 0)));
+            // Every limit keeps what the client's turn cap lets through (the
+            // decisions of exchanges 15 and 19), however long the answers are.
+            assert!(results.iter().all(|r| r.2 == CLIENT_TURNS && r.3 == 2), "{results:?}");
         }
     }
 }

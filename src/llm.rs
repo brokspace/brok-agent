@@ -38,6 +38,55 @@ pub enum LlmError {
     Decode(String),
 }
 
+/// What to tell the person asking when the model cannot be used: what
+/// happened and one thing to do next. Never includes the API key, nor
+/// credentials written in the URL.
+pub fn explain(error: &LlmError, name: &str, provider: &LlmProvider) -> String {
+    let url = without_credentials(&provider.base_url);
+    let choose = "choose another model with `brok setup llm`";
+    match error {
+        LlmError::MissingApiKey(variable) if readable_variable(variable) => format!(
+            "the provider `{name}` needs an API key in {variable}, which is not set. Export it, then run `brok restart`"
+        ),
+        LlmError::MissingApiKey(variable) => format!(
+            "brok-agent may not read {variable}, the key variable of the provider `{name}`: it only gets variables \
+             ending in `_API_KEY` or starting with `OPENAI_`. Rename it in brok.yml and your shell, then run `brok restart`"
+        ),
+        LlmError::Http(e) if e.is_connect() || e.is_timeout() => {
+            format!("cannot reach the model `{name}` at {url}. Start its server, or {choose}")
+        }
+        LlmError::Status { status: status @ (401 | 403), .. } => {
+            let key = provider.api_key_env.as_deref().map_or_else(
+                || "set `api_key_env` for it in brok.yml".to_owned(),
+                |variable| format!("check the key in {variable}, then run `brok restart`"),
+            );
+            format!("the provider `{name}` refused the request (HTTP {status}): {key}")
+        }
+        LlmError::Status { status: 404, .. } => format!(
+            "the provider `{name}` has no model `{}` at {url} (HTTP 404). Install it (Ollama: `ollama pull {}`), or {choose}",
+            provider.model, provider.model
+        ),
+        other => format!("the model `{name}` failed: {other}"),
+    }
+}
+
+/// Whether `permissions.env` in shard.json lets the agent see this variable;
+/// the runtime removes every other one.
+fn readable_variable(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    name.ends_with("_API_KEY") || name.starts_with("OPENAI_")
+}
+
+/// `url` without a `user:password@` part.
+fn without_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else { return url.to_owned() };
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    match rest[..authority_end].rfind('@') {
+        Some(at) => format!("{scheme}://{}", &rest[at + 1..]),
+        None => url.to_owned(),
+    }
+}
+
 /// Author of a chat message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -277,6 +326,57 @@ fn truncate(text: &mut String, max: usize) {
 
 #[cfg(test)]
 mod tests {
+    fn provider(base_url: &str, api_key_env: Option<&str>) -> crate::settings::LlmProvider {
+        crate::settings::LlmProvider {
+            base_url: base_url.into(),
+            model: "coder:7b".into(),
+            api_key_env: api_key_env.map(str::to_owned),
+            temperature: None,
+            max_tokens: None,
+        }
+    }
+
+    #[test]
+    fn failures_say_what_to_do_next() {
+        use super::{LlmError, explain};
+        let hosted = provider("https://user:s3cret@api.example.com/v1", Some("EXAMPLE_API_KEY"));
+        let status = |status| LlmError::Status { status, body: "key sk-leaked".into() };
+        let refused = explain(&status(401), "example", &hosted);
+        assert!(refused.contains("EXAMPLE_API_KEY") && refused.contains("brok restart"), "{refused}");
+        assert!(!refused.contains("sk-leaked") && !refused.contains("s3cret"), "{refused}");
+        let missing = explain(&status(404), "example", &hosted);
+        assert!(missing.contains("`coder:7b` at https://api.example.com/v1"), "{missing}");
+        assert!(!missing.contains("s3cret"), "{missing}");
+        let unset = explain(&LlmError::MissingApiKey("EXAMPLE_API_KEY".into()), "example", &hosted);
+        assert!(unset.contains("EXAMPLE_API_KEY, which is not set"), "{unset}");
+        assert!(explain(&status(500), "example", &hosted).contains("HTTP 500"));
+        let hidden = explain(&LlmError::MissingApiKey("MY_TOKEN".into()), "example", &hosted);
+        assert!(hidden.contains("may not read MY_TOKEN") && hidden.contains("_API_KEY"), "{hidden}");
+    }
+
+    #[test]
+    fn the_stated_variable_rule_matches_the_manifest() {
+        let manifest: serde_json::Value = serde_json::from_str(include_str!("../shard.json")).unwrap();
+        let allowed: Vec<&str> =
+            manifest["permissions"]["env"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        assert!(allowed.contains(&"*_API_KEY") && allowed.contains(&"OPENAI_*"), "{allowed:?}");
+    }
+
+    #[tokio::test]
+    async fn a_server_that_is_not_running_is_named_quickly() {
+        use super::{LlmClient, Message, explain};
+        // A port that was just free: nothing listens there.
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let local = provider(&format!("http://127.0.0.1:{port}/v1"), None);
+        let client = LlmClient::new(&local).unwrap();
+        let started = std::time::Instant::now();
+        let error = client.complete(&[Message::user("hi")]).await.unwrap_err();
+        assert!(started.elapsed() < std::time::Duration::from_secs(11));
+        let text = explain(&error, "ollama", &local);
+        assert!(text.starts_with(&format!("cannot reach the model `ollama` at http://127.0.0.1:{port}/v1.")), "{text}");
+        assert!(text.contains("brok setup llm"), "{text}");
+    }
+
     use super::*;
 
     fn chunk(text: &str) -> String {
