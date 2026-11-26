@@ -11,7 +11,7 @@ The default system shard of [Brokspace](https://github.com/brokspace/brok). `bro
 
 | Responsibility | How |
 |---|---|
-| **Change tracking** | Every few seconds, in every repository of the workspace (the root repository, its submodules and independent repositories cloned inside it), fingerprints dirty files (`git diff --name-only HEAD` + untracked files) and follows `HEAD`: after a commit, pull, checkout or rebase, the files that differ between the old and new commit are reported too. Only what changed is published as `file:changed`, so the core indexer stays fresh. |
+| **Change tracking** | In every repository of the workspace (the root repository, its submodules and independent repositories cloned inside it), notices changes through file system events (polling is the fallback, see `watch`), fingerprints dirty files and follows `HEAD`: after a commit, pull, checkout or rebase, the files that differ between the old and new commit are reported too. Only what changed is published as `file:changed`, so the core indexer stays fresh. |
 | **Pre-indexation review** | Optionally sends changed files matching glob filters (e.g. `src/api/**`, never `**/*.md`) to an LLM before publishing `file:changed`, and reports a `review:result` with a `pass` / `warn` / `fail` verdict. |
 | **Answers (RAG)** | Handles `brok ask`: hybrid search over the local index, context assembly within a budget, secret redaction, then streams the answer from any OpenAI-compatible API. |
 
@@ -133,15 +133,27 @@ Payload types are defined in [`brok-sdk`](https://github.com/brokspace/brok-sdk)
 - Retrieved context and files sent for review are scrubbed of AWS keys, GitHub/Slack tokens, `sk-` style
   API keys, PEM private keys and `password = "..."` style assignments before leaving the machine.
 
+## Learn from this shard
+
+Writing your own shard? Start with [Write your first shard](https://github.com/brokspace/brok/blob/staging/docs/shard-tutorial.md);
+then this one shows the patterns of a larger shard:
+
+| You want to | Look at |
+|---|---|
+| Wire the bus: context, settings, subscriptions, shutdown | `src/main.rs` (`run`) |
+| Parse your settings with defaults | `src/settings.rs` |
+| Answer a request with streamed replies | `src/ask.rs` (`handle`, `client.reply`) |
+| Ask the index a question | `src/ask.rs` (`client.call::<SearchRequest, SearchResults>`) |
+| Keep blocking work off the event loop | `src/main.rs` (`spawn_blocking`), `src/watch.rs` |
+| Publish your own events | `src/review.rs`, `src/tracker.rs` |
+| Use the user's LLM providers without handling keys in files | `src/llm.rs` |
+| Remove secrets before anything leaves the machine | `src/guardrails.rs` |
+| Keep the manifest and the code in agreement | the manifest test in `src/main.rs` |
+
 ## Development
 
-Clone this repository next to `brok-sdk` (it is a path dependency):
-
-```text
-brokspace/
-├── brok-sdk/
-└── brok-agent/
-```
+The SDK comes from crates.io. To change `brok-sdk` at the same time, clone it next to this repository and
+run `brok/scripts/bootstrap.sh`, which patches the dependency to your checkout.
 
 ```sh
 cargo test
