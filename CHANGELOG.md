@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
-- When the model cannot be used (server not running, missing or refused API key, model not installed) the answer says what happened and what to do next, instead of a chain of transport errors (brokspace/brok#197).
+- When the model cannot be used (server not running, missing or refused API key, model not installed) the answer says what happened and what to do next, instead of a chain of transport errors. A key variable the agent is not allowed to read is explained too (brokspace/brok#197).
 - A long last answer no longer removes the conversation history from the next question. Earlier questions, where decisions usually are, are kept before long answers; a long answer is shortened or replaced by a note, within the same limits (brokspace/brok-agent#59).
 
 ## [0.5.1] - 2026-11-26
