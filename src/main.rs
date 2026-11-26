@@ -11,6 +11,7 @@ mod ask;
 mod context;
 mod guardrails;
 mod llm;
+mod queue;
 mod review;
 mod settings;
 mod tracker;
@@ -27,6 +28,7 @@ use brok_sdk::prelude::*;
 use tokio::time::MissedTickBehavior;
 use tracing_subscriber::EnvFilter;
 
+use crate::queue::AskQueue;
 use crate::review::Reviewer;
 use crate::settings::{AgentSettings, LlmConfig};
 use crate::tracker::Tracker;
@@ -97,6 +99,7 @@ async fn run() -> anyhow::Result<()> {
         reviewer,
         Arc::clone(&dirty),
     ));
+    let asks = AskQueue::default();
     tracing::info!(workspace = %context.workspace_root.display(), "brok-agent ready");
 
     loop {
@@ -111,7 +114,14 @@ async fn run() -> anyhow::Result<()> {
                     break;
                 }
                 Some(event) if event.is::<AskRequest>() => {
-                    tokio::spawn(ask::handle(client.clone(), event, Arc::clone(&settings), Arc::clone(&llm), members, Arc::clone(&dirty)));
+                    // Neither branch waits here, so shutdown is handled even when full.
+                    if let Some(ticket) = asks.admit() {
+                        let work = ask::handle(client.clone(), event, Arc::clone(&settings), Arc::clone(&llm), members, Arc::clone(&dirty));
+                        tokio::spawn(ticket.run(work));
+                    } else {
+                        tracing::warn!("too many questions at once; refusing one");
+                        tokio::spawn(ask::refuse_busy(client.clone(), event));
+                    }
                 }
                 Some(event) => tracing::debug!(topic = %event.topic, "ignoring event"),
             },
