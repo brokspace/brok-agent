@@ -12,6 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
+- Built on `brok-sdk` 0.3.1: events waiting to be handled are limited to 32 MiB as well as 256 events, so large events can no longer queue gigabytes (brokspace/brok-sdk#25).
 - At most 4 questions are answered at once and 28 more wait their turn; beyond that the requester is told the agent is busy, instead of every request starting a search and a model call (brokspace/brok-agent#50).
 
 ## [0.5.0] - 2026-11-26
